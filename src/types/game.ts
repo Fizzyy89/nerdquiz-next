@@ -1,0 +1,162 @@
+/**
+ * Shared Game Types
+ */
+
+// ============================================
+// PLAYER
+// ============================================
+
+export interface Player {
+  id: string;
+  name: string;
+  avatarSeed: string;
+  score: number;
+  isHost: boolean;
+  isConnected: boolean;
+  hasAnswered: boolean;
+  streak: number;
+}
+
+// ============================================
+// CATEGORY
+// ============================================
+
+export interface Category {
+  id: string;
+  name: string;
+  icon: string;
+  questionCount: number;
+}
+
+// ============================================
+// QUESTION
+// ============================================
+
+export type QuestionType = 'choice' | 'estimation';
+
+export interface Question {
+  id: string;
+  text: string;
+  type: QuestionType;
+  category: string;
+  categoryIcon: string;
+  // For multiple choice
+  answers?: string[];
+  correctIndex?: number;
+  // For estimation
+  unit?: string;
+  correctValue?: number;
+}
+
+// ============================================
+// GAME STATE
+// ============================================
+
+export type GamePhase = 
+  | 'lobby'
+  | 'category_announcement'
+  | 'category_voting'
+  | 'category_wheel'
+  | 'category_losers_pick'
+  | 'category_dice_duel'
+  | 'question'
+  | 'estimation'
+  | 'revealing'
+  | 'estimation_reveal'
+  | 'scoreboard'
+  | 'final';
+
+export type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_duel';
+
+export interface DiceDuelState {
+  player1Id: string;
+  player2Id: string;
+  player1Rolls: number[] | null;
+  player2Rolls: number[] | null;
+  winnerId: string | null;
+  phase: 'selecting' | 'rolling' | 'result';
+}
+
+export interface GameSettings {
+  maxRounds: number;
+  questionsPerRound: number;
+  timePerQuestion: number;
+}
+
+export interface RoomState {
+  code: string;
+  players: Player[];
+  settings: GameSettings;
+  phase: GamePhase;
+  currentRound: number;
+  currentQuestionIndex: number;
+  totalQuestions: number;
+  currentQuestion: Question | null;
+  categorySelectionMode: CategorySelectionMode | null;
+  votingCategories: Category[];
+  categoryVotes: Record<string, string>;
+  selectedCategory: string | null;
+  loserPickPlayerId: string | null;
+  diceDuel: DiceDuelState | null;
+  timerEnd: number | null;
+  showingCorrectAnswer: boolean;
+  wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
+}
+
+// ============================================
+// SOCKET EVENTS
+// ============================================
+
+export interface AnswerResult {
+  playerId: string;
+  playerName: string;
+  avatarSeed: string;
+  correct: boolean;
+  // Points breakdown
+  points: number;
+  basePoints: number;
+  timeBonus: number;
+  streakBonus: number;
+  streak: number;
+  newScore: number;
+  // Timing & order
+  answerOrder: number | null; // 1 = first to answer, null = didn't answer
+  responseTimeMs: number | null; // Time taken to answer in ms
+  // For choice questions
+  answer?: number;
+  // For estimation questions
+  estimation?: number;
+  diff?: number; // Signed difference from correct answer
+  absDiff?: number; // Absolute difference
+}
+
+export interface FinalRanking {
+  rank: number;
+  playerId: string;
+  name: string;
+  score: number;
+  avatarSeed: string;
+}
+
+// ============================================
+// CLIENT STATE
+// ============================================
+
+export interface ClientState {
+  // Connection
+  isConnected: boolean;
+  playerId: string | null;
+  roomCode: string | null;
+  
+  // Room
+  room: RoomState | null;
+  
+  // UI
+  selectedAnswer: number | null;
+  estimationValue: string;
+  hasSubmitted: boolean;
+  
+  // Results
+  lastResults: AnswerResult[] | null;
+  finalRankings: FinalRanking[] | null;
+}

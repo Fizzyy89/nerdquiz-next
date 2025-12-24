@@ -1,0 +1,143 @@
+// Prisma Schema für NerdQuiz
+// Dokumentation: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// QUIZ & FRAGEN (Cold Data - Persistenz)
+// ============================================
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  displayName String
+  description String?
+  icon        String?    // Emoji oder Icon-Name
+  color       String?    // Hex-Farbe für UI
+  questions   Question[]
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  @@map("categories")
+}
+
+model Question {
+  id           String       @id @default(cuid())
+  categoryId   String
+  category     Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  
+  // Frage-Inhalt
+  text         String
+  type         QuestionType @default(MULTIPLE_CHOICE)
+  difficulty   Difficulty   @default(MEDIUM)
+  
+  // Für Multiple Choice
+  answers      String[]     // Array von Antworten
+  correctIndex Int?         // Index der korrekten Antwort (0-3)
+  
+  // Für Schätzfragen
+  correctValue Float?       // Korrekte Zahl bei Schätzfragen
+  unit         String?      // Einheit (z.B. "km", "Jahre", "Meter")
+  tolerance    Float?       // Toleranz in Prozent für Schätzfragen
+  
+  // Metadaten
+  explanation  String?      // Optionale Erklärung nach Beantwortung
+  source       String?      // Quellenangabe
+  imageUrl     String?      // Optionales Bild zur Frage
+  
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  @@index([categoryId])
+  @@map("questions")
+}
+
+enum QuestionType {
+  MULTIPLE_CHOICE
+  ESTIMATION
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+// ============================================
+// SPIEL-HISTORIE (Cold Data)
+// ============================================
+
+model GameSession {
+  id           String       @id @default(cuid())
+  roomCode     String       // 4-stelliger Raum-Code
+  
+  // Spielkonfiguration
+  maxRounds    Int
+  questionsPerRound Int
+  
+  // Spielstatus
+  status       GameStatus   @default(COMPLETED)
+  totalRounds  Int
+  
+  // Zeitstempel
+  startedAt    DateTime
+  endedAt      DateTime?
+  
+  // Spieler-Ergebnisse
+  results      PlayerResult[]
+  
+  createdAt    DateTime     @default(now())
+
+  @@index([roomCode])
+  @@map("game_sessions")
+}
+
+model PlayerResult {
+  id            String      @id @default(cuid())
+  gameSessionId String
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  
+  playerName    String
+  finalScore    Int
+  correctAnswers Int
+  totalAnswers  Int
+  rank          Int         // Platzierung im Spiel
+  
+  createdAt     DateTime    @default(now())
+
+  @@index([gameSessionId])
+  @@map("player_results")
+}
+
+enum GameStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABANDONED
+}
+
+// ============================================
+// OPTIONALER USER (für zukünftige Features)
+// ============================================
+
+model User {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  displayName  String
+  avatarSeed   String?  // Für DiceBear Avatare
+  
+  // Statistiken
+  gamesPlayed  Int      @default(0)
+  gamesWon     Int      @default(0)
+  totalScore   Int      @default(0)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("users")
+}
