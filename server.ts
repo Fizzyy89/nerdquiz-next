@@ -727,7 +727,12 @@ app.prepare().then(() => {
       if (room.state.phase === 'revealing' || room.state.phase === 'estimation_reveal') {
         proceedAfterReveal(room, io);
       } else if (room.state.phase === 'scoreboard') {
-        startCategorySelection(room, io);
+        // Prüfen ob letzte Runde - dann zum Finale, nicht zur nächsten Kategorie
+        if (room.state.currentRound >= room.settings.maxRounds) {
+          showFinalResults(room, io);
+        } else {
+          startCategorySelection(room, io);
+        }
       }
     });
 
@@ -1538,11 +1543,9 @@ app.prepare().then(() => {
     emitPhaseChange(room, io, 'scoreboard');
     io.to(room.code).emit('room_update', roomToClient(room));
 
-    if (room.state.currentRound >= room.settings.maxRounds) {
-      setTimeout(() => {
-        showFinalResults(room, io);
-      }, 5000);
-    } else {
+    // Runde nur erhöhen wenn es NICHT die letzte Runde ist
+    // Der Übergang zum Finale wird durch Host-Klick oder automatisch gesteuert
+    if (room.state.currentRound < room.settings.maxRounds) {
       room.state.currentRound++;
     }
   }
