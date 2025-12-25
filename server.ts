@@ -12,7 +12,7 @@ import path from 'path';
 import { botManager } from './src/server/botManager';
 
 const dev = process.env.NODE_ENV !== 'production';
-const hostname = 'localhost';
+const hostname = dev ? 'localhost' : '0.0.0.0';
 const port = parseInt(process.env.PORT || '3001', 10);
 
 const app = next({ dev, hostname, port, turbopack: false });
@@ -324,7 +324,9 @@ app.prepare().then(() => {
 
   const io = new SocketServer(httpServer, {
     cors: {
-      origin: dev ? ['http://localhost:3000', 'http://localhost:3001'] : [],
+      origin: dev 
+        ? ['http://localhost:3000', 'http://localhost:3001'] 
+        : process.env.CORS_ORIGIN?.split(',') || [],
       methods: ['GET', 'POST'],
     },
     pingTimeout: 60000,
