@@ -13,7 +13,8 @@ import {
   Play,
   Zap,
   SkipForward,
-  Dice5,
+  Dices,
+  Swords,
 } from 'lucide-react';
 import { getSocket } from '@/lib/socket';
 import { useGameStore } from '@/store/gameStore';
@@ -42,7 +43,8 @@ export function DevPanel() {
   const forceVoting = () => devCommand('force_category_mode', { mode: 'voting' });
   const forceWheel = () => devCommand('force_category_mode', { mode: 'wheel' });
   const forceLosersPick = () => devCommand('force_category_mode', { mode: 'losers_pick' });
-  const forceDiceDuel = () => devCommand('force_category_mode', { mode: 'dice_duel' });
+  const forceDiceRoyale = () => devCommand('force_category_mode', { mode: 'dice_royale' });
+  const forceRPSDuel = () => devCommand('force_category_mode', { mode: 'rps_duel' });
   const addBotPlayer = () => devCommand('add_bot');
   const skipToQuestion = () => devCommand('skip_to_question');
   const skipToEstimation = () => devCommand('skip_to_estimation');
@@ -131,11 +133,14 @@ export function DevPanel() {
                       <h4 className="text-xs text-zinc-400 mb-2 uppercase tracking-wider">
                         Kategorie-Modus erzwingen
                       </h4>
-                      <div className="grid grid-cols-4 gap-2">
+                      <div className="grid grid-cols-3 gap-2">
                         <DevButton onClick={forceVoting} icon={Vote} label="Voting" color="blue" />
                         <DevButton onClick={forceWheel} icon={CircleDot} label="Wheel" color="purple" />
                         <DevButton onClick={forceLosersPick} icon={Crown} label="Loser" color="amber" />
-                        <DevButton onClick={forceDiceDuel} icon={Dice5} label="Dice" color="rose" />
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 mt-2">
+                        <DevButton onClick={forceDiceRoyale} icon={Dices} label="Dice Royale" color="emerald" />
+                        <DevButton onClick={forceRPSDuel} icon={Swords} label="RPS Duel" color="rose" />
                       </div>
                     </div>
 
@@ -227,6 +232,7 @@ function DevButton({
     orange: 'bg-orange-500/20 text-orange-400 hover:bg-orange-500/30 border-orange-500/30',
     indigo: 'bg-indigo-500/20 text-indigo-400 hover:bg-indigo-500/30 border-indigo-500/30',
     rose: 'bg-rose-500/20 text-rose-400 hover:bg-rose-500/30 border-rose-500/30',
+    emerald: 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border-emerald-500/30',
   };
 
   return (

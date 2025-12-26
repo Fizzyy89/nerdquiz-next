@@ -70,15 +70,30 @@ interface GameQuestion {
   categoryIcon: string;
 }
 
-type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_duel';
+type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_royale' | 'rps_duel';
 
-interface DiceDuelState {
+// Dice Royale - All players roll, highest wins
+interface DiceRoyaleState {
+  playerRolls: Map<string, number[] | null>; // playerId -> [die1, die2]
+  winnerId: string | null;
+  tiedPlayerIds: string[] | null; // Players who need to re-roll
+  phase: 'rolling' | 'reroll' | 'result';
+  round: number; // Track tie-breaker rounds
+}
+
+// Rock Paper Scissors Duel - 2 players, best of 3
+type RPSChoice = 'rock' | 'paper' | 'scissors';
+
+interface RPSDuelState {
   player1Id: string;
   player2Id: string;
-  player1Rolls: number[] | null; // [die1, die2]
-  player2Rolls: number[] | null;
+  player1Choices: RPSChoice[];
+  player2Choices: RPSChoice[];
+  player1Wins: number;
+  player2Wins: number;
+  currentRound: number; // 1, 2, or 3
   winnerId: string | null;
-  phase: 'selecting' | 'rolling' | 'result';
+  phase: 'selecting' | 'choosing' | 'revealing' | 'result';
 }
 
 interface GameRoom {
@@ -91,7 +106,7 @@ interface GameRoom {
     timePerQuestion: number;
   };
   state: {
-    phase: 'lobby' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'final';
+    phase: 'lobby' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_royale' | 'category_rps_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'final';
     currentRound: number;
     currentQuestionIndex: number;
     currentQuestion: GameQuestion | null;
@@ -104,7 +119,8 @@ interface GameRoom {
     showingCorrectAnswer: boolean;
     loserPickPlayerId: string | null;
     lastLoserPickRound: number; // Cooldown tracking
-    diceDuel: DiceDuelState | null;
+    diceRoyale: DiceRoyaleState | null;
+    rpsDuel: RPSDuelState | null;
     wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
   };
   createdAt: Date;
@@ -290,6 +306,15 @@ function roomToClient(room: GameRoom) {
     }),
   } : null;
 
+  // Convert DiceRoyale state for client (Map -> Record)
+  const diceRoyaleClient = room.state.diceRoyale ? {
+    playerRolls: Object.fromEntries(room.state.diceRoyale.playerRolls),
+    winnerId: room.state.diceRoyale.winnerId,
+    tiedPlayerIds: room.state.diceRoyale.tiedPlayerIds,
+    phase: room.state.diceRoyale.phase,
+    round: room.state.diceRoyale.round,
+  } : null;
+
   return {
     code: room.code,
     players,
@@ -304,7 +329,8 @@ function roomToClient(room: GameRoom) {
     categoryVotes: Object.fromEntries(room.state.categoryVotes),
     selectedCategory: room.state.selectedCategory,
     loserPickPlayerId: room.state.loserPickPlayerId,
-    diceDuel: room.state.diceDuel,
+    diceRoyale: diceRoyaleClient,
+    rpsDuel: room.state.rpsDuel,
     timerEnd: room.state.timerEnd,
     showingCorrectAnswer: room.state.showingCorrectAnswer,
     wheelSelectedIndex: room.state.wheelSelectedIndex,
@@ -394,33 +420,67 @@ app.prepare().then(() => {
       finalizeLosersPick(room, io, data.categoryId);
     });
 
-    botManager.registerActionHandler('dice_roll', (data) => {
+    // Dice Royale bot handler
+    botManager.registerActionHandler('dice_royale_roll', (data) => {
       const room = rooms.get(data.roomCode);
-      if (!room || room.state.phase !== 'category_dice_duel') return;
-      const duel = room.state.diceDuel;
-      if (!duel || duel.phase !== 'rolling') return;
-      const isPlayer1 = data.playerId === duel.player1Id;
-      const isPlayer2 = data.playerId === duel.player2Id;
-      if (!isPlayer1 && !isPlayer2) return;
-      if (isPlayer1 && duel.player1Rolls) return;
-      if (isPlayer2 && duel.player2Rolls) return;
+      if (!room || room.state.phase !== 'category_dice_royale') return;
+      const royale = room.state.diceRoyale;
+      if (!royale || royale.phase !== 'rolling') return;
+      if (!royale.playerRolls.has(data.playerId)) return;
+      if (royale.playerRolls.get(data.playerId) !== null) return;
+      // Check if in tie-breaker and player is eligible
+      if (royale.tiedPlayerIds && !royale.tiedPlayerIds.includes(data.playerId)) return;
       const rolls = [rollDie(), rollDie()];
-      if (isPlayer1) duel.player1Rolls = rolls;
-      else duel.player2Rolls = rolls;
-      io.to(room.code).emit('dice_roll', { playerId: data.playerId, rolls });
+      royale.playerRolls.set(data.playerId, rolls);
+      io.to(room.code).emit('dice_royale_roll', { playerId: data.playerId, rolls });
       io.to(room.code).emit('room_update', roomToClient(room));
-      if (duel.player1Rolls && duel.player2Rolls) {
-        setTimeout(() => checkDiceDuelResult(room, io), 1500);
+      // Check if all eligible players have rolled
+      let allRolled = true;
+      const eligiblePlayers = royale.tiedPlayerIds || Array.from(royale.playerRolls.keys());
+      eligiblePlayers.forEach(pid => {
+        if (royale.playerRolls.get(pid) === null) allRolled = false;
+      });
+      if (allRolled) {
+        setTimeout(() => checkDiceRoyaleResult(room, io), 1500);
       }
     });
 
-    botManager.registerActionHandler('dice_duel_pick', (data) => {
+    botManager.registerActionHandler('dice_royale_pick', (data) => {
       const room = rooms.get(data.roomCode);
-      if (!room || room.state.phase !== 'category_dice_duel') return;
-      const duel = room.state.diceDuel;
+      if (!room || room.state.phase !== 'category_dice_royale') return;
+      const royale = room.state.diceRoyale;
+      if (!royale || royale.phase !== 'result') return;
+      if (data.playerId !== royale.winnerId) return;
+      finalizeDiceRoyalePick(room, io, data.categoryId);
+    });
+
+    // RPS Duel bot handlers
+    botManager.registerActionHandler('rps_choice', (data) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'category_rps_duel') return;
+      const duel = room.state.rpsDuel;
+      if (!duel || duel.phase !== 'choosing') return;
+      const isPlayer1 = data.playerId === duel.player1Id;
+      const isPlayer2 = data.playerId === duel.player2Id;
+      if (!isPlayer1 && !isPlayer2) return;
+      const currentIndex = duel.currentRound - 1;
+      if (isPlayer1 && duel.player1Choices[currentIndex]) return;
+      if (isPlayer2 && duel.player2Choices[currentIndex]) return;
+      if (isPlayer1) duel.player1Choices.push(data.choice);
+      else duel.player2Choices.push(data.choice);
+      io.to(room.code).emit('rps_choice_made', { playerId: data.playerId });
+      if (duel.player1Choices.length === duel.currentRound && duel.player2Choices.length === duel.currentRound) {
+        resolveRPSRound(room, io);
+      }
+    });
+
+    botManager.registerActionHandler('rps_duel_pick', (data) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'category_rps_duel') return;
+      const duel = room.state.rpsDuel;
       if (!duel || duel.phase !== 'result') return;
       if (data.playerId !== duel.winnerId) return;
-      finalizeDiceDuelPick(room, io, data.categoryId);
+      finalizeRPSDuelPick(room, io, data.categoryId);
     });
   }
 
@@ -473,7 +533,8 @@ app.prepare().then(() => {
           showingCorrectAnswer: false,
           loserPickPlayerId: null,
           lastLoserPickRound: 0,
-          diceDuel: null,
+          diceRoyale: null,
+          rpsDuel: null,
           wheelSelectedIndex: null,
         },
         createdAt: new Date(),
@@ -607,61 +668,112 @@ app.prepare().then(() => {
       finalizeLosersPick(room, io, data.categoryId);
     });
 
-    // === DICE DUEL ROLL ===
-    socket.on('dice_roll', (data: { roomCode: string; playerId: string }) => {
+    // === DICE ROYALE ROLL ===
+    socket.on('dice_royale_roll', (data: { roomCode: string; playerId: string }) => {
       const room = rooms.get(data.roomCode);
-      if (!room || room.state.phase !== 'category_dice_duel') return;
+      if (!room || room.state.phase !== 'category_dice_royale') return;
       
-      const duel = room.state.diceDuel;
-      if (!duel || duel.phase !== 'rolling') return;
+      const royale = room.state.diceRoyale;
+      if (!royale || royale.phase !== 'rolling') return;
+
+      // Check if player is eligible to roll
+      if (!royale.playerRolls.has(data.playerId)) return;
+      
+      // Check if already rolled
+      if (royale.playerRolls.get(data.playerId) !== null) return;
+
+      // Check if in tie-breaker and player is eligible
+      if (royale.tiedPlayerIds && !royale.tiedPlayerIds.includes(data.playerId)) return;
+
+      // Roll the dice!
+      const rolls = [rollDie(), rollDie()];
+      royale.playerRolls.set(data.playerId, rolls);
+
+      const player = room.players.get(data.playerId);
+      console.log(`🎲 ${player?.name} rolled: ${rolls[0]} + ${rolls[1]} = ${rolls[0] + rolls[1]}`);
+
+      io.to(room.code).emit('dice_royale_roll', {
+        playerId: data.playerId,
+        rolls: rolls,
+      });
+      io.to(room.code).emit('room_update', roomToClient(room));
+
+      // Check if all eligible players have rolled
+      let allRolled = true;
+      const eligiblePlayers = royale.tiedPlayerIds || Array.from(royale.playerRolls.keys());
+      eligiblePlayers.forEach(pid => {
+        if (royale.playerRolls.get(pid) === null) allRolled = false;
+      });
+
+      if (allRolled) {
+        setTimeout(() => {
+          checkDiceRoyaleResult(room, io);
+        }, 1500); // Wait for animation
+      }
+    });
+
+    // === DICE ROYALE PICK CATEGORY ===
+    socket.on('dice_royale_pick', (data: { roomCode: string; playerId: string; categoryId: string }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'category_dice_royale') return;
+      
+      const royale = room.state.diceRoyale;
+      if (!royale || royale.phase !== 'result') return;
+
+      // Only the winner can pick
+      if (data.playerId !== royale.winnerId) return;
+
+      finalizeDiceRoyalePick(room, io, data.categoryId);
+    });
+
+    // === RPS DUEL CHOICE ===
+    socket.on('rps_choice', (data: { roomCode: string; playerId: string; choice: RPSChoice }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'category_rps_duel') return;
+      
+      const duel = room.state.rpsDuel;
+      if (!duel || duel.phase !== 'choosing') return;
 
       // Check if this player is in the duel
       const isPlayer1 = data.playerId === duel.player1Id;
       const isPlayer2 = data.playerId === duel.player2Id;
       if (!isPlayer1 && !isPlayer2) return;
 
-      // Check if already rolled
-      if (isPlayer1 && duel.player1Rolls) return;
-      if (isPlayer2 && duel.player2Rolls) return;
+      // Check if already chose this round
+      const currentIndex = duel.currentRound - 1;
+      if (isPlayer1 && duel.player1Choices[currentIndex]) return;
+      if (isPlayer2 && duel.player2Choices[currentIndex]) return;
 
-      // Roll the dice!
-      const rolls = [rollDie(), rollDie()];
-      
+      // Register choice
       if (isPlayer1) {
-        duel.player1Rolls = rolls;
+        duel.player1Choices.push(data.choice);
       } else {
-        duel.player2Rolls = rolls;
+        duel.player2Choices.push(data.choice);
       }
 
       const player = room.players.get(data.playerId);
-      console.log(`🎲 ${player?.name} rolled: ${rolls[0]} + ${rolls[1]} = ${rolls[0] + rolls[1]}`);
+      console.log(`✊✌️✋ ${player?.name} chose: ${data.choice}`);
 
-      io.to(room.code).emit('dice_roll', {
-        playerId: data.playerId,
-        rolls: rolls,
-      });
-      io.to(room.code).emit('room_update', roomToClient(room));
+      io.to(room.code).emit('rps_choice_made', { playerId: data.playerId });
 
-      // Check if both have rolled
-      if (duel.player1Rolls && duel.player2Rolls) {
-        setTimeout(() => {
-          checkDiceDuelResult(room, io);
-        }, 1500); // Wait for animation
+      // Check if both have chosen
+      if (duel.player1Choices.length === duel.currentRound && duel.player2Choices.length === duel.currentRound) {
+        resolveRPSRound(room, io);
       }
     });
 
-    // === DICE DUEL PICK CATEGORY ===
-    socket.on('dice_duel_pick', (data: { roomCode: string; playerId: string; categoryId: string }) => {
+    // === RPS DUEL PICK CATEGORY ===
+    socket.on('rps_duel_pick', (data: { roomCode: string; playerId: string; categoryId: string }) => {
       const room = rooms.get(data.roomCode);
-      if (!room || room.state.phase !== 'category_dice_duel') return;
+      if (!room || room.state.phase !== 'category_rps_duel') return;
       
-      const duel = room.state.diceDuel;
+      const duel = room.state.rpsDuel;
       if (!duel || duel.phase !== 'result') return;
 
       // Only the winner can pick
       if (data.playerId !== duel.winnerId) return;
 
-      finalizeDiceDuelPick(room, io, data.categoryId);
+      finalizeRPSDuelPick(room, io, data.categoryId);
     });
 
     // === SUBMIT ANSWER (Multiple Choice) ===
@@ -943,24 +1055,26 @@ app.prepare().then(() => {
       return forcedMode;
     }
 
-    // Need at least 2 players for dice duel
     const connectedPlayers = Array.from(room.players.values()).filter(p => p.isConnected);
-    const canDoDiceDuel = connectedPlayers.length >= 2;
+    // Need at least 2 players for RPS duel
+    const canDoRPSDuel = connectedPlayers.length >= 2;
     
     // Loser's Pick cooldown: can't happen two rounds in a row
     const canDoLosersPick = room.state.currentRound - room.state.lastLoserPickRound >= 2;
     
     const rand = Math.random() * 100;
     
-    // Distribution: Voting 30%, Wheel 30%, Loser's Pick 20%, Dice Duel 20%
+    // Distribution: Voting 25%, Wheel 25%, Loser's Pick 15%, Dice Royale 20%, RPS Duel 15%
     if (canDoLosersPick && rand < 15) {
       return 'losers_pick';
-    } else if (canDoDiceDuel && rand < 35) { // 15-35% = 20% for dice duel
-      return 'dice_duel';
-    } else if (rand < 65) { // 35-65% = 30% for wheel
+    } else if (rand < 35) { // 15-35% = 20% for Dice Royale (all players)
+      return 'dice_royale';
+    } else if (canDoRPSDuel && rand < 50) { // 35-50% = 15% for RPS Duel
+      return 'rps_duel';
+    } else if (rand < 75) { // 50-75% = 25% for wheel
       return 'wheel';
     } else {
-      return 'voting'; // 65-100% = 35% for voting
+      return 'voting'; // 75-100% = 25% for voting
     }
   }
 
@@ -1012,8 +1126,10 @@ app.prepare().then(() => {
         startCategoryWheel(room, io);
       } else if (room.state.categorySelectionMode === 'losers_pick') {
         startLosersPick(room, io);
-      } else if (room.state.categorySelectionMode === 'dice_duel') {
-        startDiceDuel(room, io);
+      } else if (room.state.categorySelectionMode === 'dice_royale') {
+        startDiceRoyale(room, io);
+      } else if (room.state.categorySelectionMode === 'rps_duel') {
+        startRPSDuel(room, io);
       }
     }, 3000); // 3 seconds for announcement
   }
@@ -1077,158 +1193,189 @@ app.prepare().then(() => {
     }, 15000);
   }
 
-  function startDiceDuel(room: GameRoom, io: SocketServer) {
-    room.state.phase = 'category_dice_duel';
+  // ============================================
+  // DICE ROYALE - All players roll, highest wins
+  // ============================================
+
+  function startDiceRoyale(room: GameRoom, io: SocketServer) {
+    room.state.phase = 'category_dice_royale';
     
-    // Select two random connected players
     const connectedPlayers = Array.from(room.players.values())
       .filter(p => p.isConnected);
     
-    if (connectedPlayers.length < 2) {
-      // Fallback to voting if not enough players
-      startCategoryVoting(room, io);
-      return;
-    }
+    // Initialize all players with null rolls
+    const playerRolls = new Map<string, number[] | null>();
+    connectedPlayers.forEach(p => playerRolls.set(p.id, null));
 
-    // Shuffle and pick 2
-    const shuffled = [...connectedPlayers].sort(() => Math.random() - 0.5);
-    const player1 = shuffled[0];
-    const player2 = shuffled[1];
-
-    room.state.diceDuel = {
-      player1Id: player1.id,
-      player2Id: player2.id,
-      player1Rolls: null,
-      player2Rolls: null,
+    room.state.diceRoyale = {
+      playerRolls,
       winnerId: null,
-      phase: 'selecting',
+      tiedPlayerIds: null,
+      phase: 'rolling',
+      round: 1,
     };
 
-    console.log(`🎲 Dice Duel: ${player1.name} vs ${player2.name}`);
+    console.log(`🎲 Dice Royale: ${connectedPlayers.length} players competing`);
 
-    // Send initial state - players are being "selected"
-    emitPhaseChange(room, io, 'category_dice_duel');
+    emitPhaseChange(room, io, 'category_dice_royale');
     io.to(room.code).emit('room_update', roomToClient(room));
 
-    // Send dice_duel_start with a small delay to ensure clients have mounted
+    // Send start event after small delay
     setTimeout(() => {
-      io.to(room.code).emit('dice_duel_start', {
-        player1: { id: player1.id, name: player1.name, avatarSeed: player1.avatarSeed },
-        player2: { id: player2.id, name: player2.name, avatarSeed: player2.avatarSeed },
+      io.to(room.code).emit('dice_royale_start', {
+        players: connectedPlayers.map(p => ({
+          id: p.id,
+          name: p.name,
+          avatarSeed: p.avatarSeed,
+        })),
       });
-    }, 300);
-
-    // After selection animation, allow rolling (300ms delay + 2500ms animation)
-    setTimeout(() => {
-      if (room.state.diceDuel) {
-        room.state.diceDuel.phase = 'rolling';
-        io.to(room.code).emit('dice_duel_ready');
-        io.to(room.code).emit('room_update', roomToClient(room));
-      }
-    }, 2800);
+      io.to(room.code).emit('dice_royale_ready');
+    }, 500);
 
     // Timeout - auto-roll for players who haven't rolled after 15 seconds
     setTimeout(() => {
-      if (room.state.phase === 'category_dice_duel' && room.state.diceDuel?.phase === 'rolling') {
-        // Auto-roll for any player who hasn't rolled
-        if (!room.state.diceDuel.player1Rolls) {
-          room.state.diceDuel.player1Rolls = [rollDie(), rollDie()];
-          io.to(room.code).emit('dice_roll', {
-            playerId: room.state.diceDuel.player1Id,
-            rolls: room.state.diceDuel.player1Rolls,
-          });
-        }
-        if (!room.state.diceDuel.player2Rolls) {
-          room.state.diceDuel.player2Rolls = [rollDie(), rollDie()];
-          io.to(room.code).emit('dice_roll', {
-            playerId: room.state.diceDuel.player2Id,
-            rolls: room.state.diceDuel.player2Rolls,
-          });
-        }
-        checkDiceDuelResult(room, io);
+      if (room.state.phase === 'category_dice_royale' && room.state.diceRoyale?.phase === 'rolling') {
+        autoRollRemainingPlayers(room, io);
       }
-    }, 17800); // 2.8s selection + 15s rolling time
+    }, 15500);
   }
 
-  function checkDiceDuelResult(room: GameRoom, io: SocketServer) {
-    const duel = room.state.diceDuel;
-    if (!duel || !duel.player1Rolls || !duel.player2Rolls) return;
+  function autoRollRemainingPlayers(room: GameRoom, io: SocketServer) {
+    const royale = room.state.diceRoyale;
+    if (!royale) return;
 
-    const sum1 = duel.player1Rolls[0] + duel.player1Rolls[1];
-    const sum2 = duel.player2Rolls[0] + duel.player2Rolls[1];
+    // Auto-roll for any player who hasn't rolled
+    royale.playerRolls.forEach((rolls, playerId) => {
+      if (rolls === null) {
+        const autoRolls = [rollDie(), rollDie()];
+        royale.playerRolls.set(playerId, autoRolls);
+        io.to(room.code).emit('dice_royale_roll', {
+          playerId,
+          rolls: autoRolls,
+        });
+      }
+    });
 
-    console.log(`🎲 Dice results: Player1=${sum1}, Player2=${sum2}`);
+    // Check result after auto-rolls
+    setTimeout(() => checkDiceRoyaleResult(room, io), 500);
+  }
 
-    if (sum1 === sum2) {
-      // Tie! Roll again
-      io.to(room.code).emit('dice_duel_tie');
-      
-      // Reset rolls and let them roll again
+  function checkDiceRoyaleResult(room: GameRoom, io: SocketServer) {
+    const royale = room.state.diceRoyale;
+    if (!royale) return;
+
+    // Check if all players have rolled
+    let allRolled = true;
+    royale.playerRolls.forEach((rolls) => {
+      if (rolls === null) allRolled = false;
+    });
+    if (!allRolled) return;
+
+    // Calculate sums and find highest
+    const sums: { playerId: string; sum: number; rolls: number[] }[] = [];
+    royale.playerRolls.forEach((rolls, playerId) => {
+      if (rolls) {
+        sums.push({ playerId, sum: rolls[0] + rolls[1], rolls });
+      }
+    });
+
+    sums.sort((a, b) => b.sum - a.sum);
+    const highestSum = sums[0]?.sum || 0;
+    const tiedPlayers = sums.filter(s => s.sum === highestSum);
+
+    console.log(`🎲 Dice Royale results - highest: ${highestSum}, tied: ${tiedPlayers.length}`);
+
+    if (tiedPlayers.length > 1) {
+      // Tie! Only tied players roll again
+      royale.tiedPlayerIds = tiedPlayers.map(p => p.playerId);
+      royale.phase = 'reroll';
+      royale.round++;
+
+      io.to(room.code).emit('dice_royale_tie', {
+        tiedPlayerIds: royale.tiedPlayerIds,
+        round: royale.round,
+      });
+      io.to(room.code).emit('room_update', roomToClient(room));
+
+      // Reset rolls only for tied players
       setTimeout(() => {
-        if (room.state.diceDuel) {
-          room.state.diceDuel.player1Rolls = null;
-          room.state.diceDuel.player2Rolls = null;
-          room.state.diceDuel.phase = 'rolling';
-          io.to(room.code).emit('dice_duel_ready');
+        if (royale.tiedPlayerIds) {
+          royale.tiedPlayerIds.forEach(playerId => {
+            royale.playerRolls.set(playerId, null);
+          });
+          royale.phase = 'rolling';
+          io.to(room.code).emit('dice_royale_ready');
           io.to(room.code).emit('room_update', roomToClient(room));
+
+          // Timeout for re-roll
+          setTimeout(() => {
+            if (room.state.phase === 'category_dice_royale' && royale.phase === 'rolling') {
+              autoRollRemainingPlayers(room, io);
+            }
+          }, 10000);
         }
-      }, 2000);
+      }, 2500);
       return;
     }
 
     // We have a winner!
-    const winnerId = sum1 > sum2 ? duel.player1Id : duel.player2Id;
-    duel.winnerId = winnerId;
-    duel.phase = 'result';
-    room.state.loserPickPlayerId = winnerId; // Reuse this field for the winner who gets to pick
+    const winnerId = tiedPlayers[0].playerId;
+    royale.winnerId = winnerId;
+    royale.phase = 'result';
+    room.state.loserPickPlayerId = winnerId; // Reuse for winner who picks
 
     const winner = room.players.get(winnerId);
-    console.log(`🎲 Winner: ${winner?.name} with ${Math.max(sum1, sum2)}`);
+    console.log(`🎲 Dice Royale Winner: ${winner?.name} with ${highestSum}`);
 
-    // Notify bot manager about dice duel winner
+    // Notify bot manager about dice royale winner
     if (dev) {
-      botManager.onDiceDuelWinner(room.code, winnerId);
+      botManager.onDiceRoyaleWinner(room.code, winnerId);
     }
 
-    io.to(room.code).emit('dice_duel_winner', {
+    io.to(room.code).emit('dice_royale_winner', {
       winnerId,
       winnerName: winner?.name,
-      sum1,
-      sum2,
+      winningSum: highestSum,
+      allResults: sums.map(s => ({
+        playerId: s.playerId,
+        playerName: room.players.get(s.playerId)?.name,
+        rolls: s.rolls,
+        sum: s.sum,
+      })),
     });
     io.to(room.code).emit('room_update', roomToClient(room));
 
     // After showing winner, let them pick
     setTimeout(() => {
-      if (room.state.phase === 'category_dice_duel') {
-        startDiceDuelPick(room, io);
+      if (room.state.phase === 'category_dice_royale') {
+        startDiceRoyalePick(room, io);
       }
     }, 3000);
   }
 
-  function startDiceDuelPick(room: GameRoom, io: SocketServer) {
+  function startDiceRoyalePick(room: GameRoom, io: SocketServer) {
     room.state.timerEnd = Date.now() + 15000;
-    io.to(room.code).emit('dice_duel_pick');
+    io.to(room.code).emit('dice_royale_pick');
     io.to(room.code).emit('room_update', roomToClient(room));
 
     // Timeout fallback
     setTimeout(() => {
-      if (room.state.phase === 'category_dice_duel' && room.state.diceDuel?.phase === 'result') {
+      if (room.state.phase === 'category_dice_royale' && room.state.diceRoyale?.phase === 'result') {
         const randomCat = room.state.votingCategories[
           Math.floor(Math.random() * room.state.votingCategories.length)
         ];
-        finalizeDiceDuelPick(room, io, randomCat.id);
+        finalizeDiceRoyalePick(room, io, randomCat.id);
       }
     }, 15000);
   }
 
-  function finalizeDiceDuelPick(room: GameRoom, io: SocketServer, categoryId: string) {
+  function finalizeDiceRoyalePick(room: GameRoom, io: SocketServer, categoryId: string) {
     room.state.selectedCategory = categoryId;
     room.state.roundQuestions = getRandomQuestions(categoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
 
     const categoryData = loadCategories().get(categoryId);
-    const winner = room.state.diceDuel?.winnerId ? room.players.get(room.state.diceDuel.winnerId) : null;
+    const winner = room.state.diceRoyale?.winnerId ? room.players.get(room.state.diceRoyale.winnerId) : null;
     
     io.to(room.code).emit('category_selected', { 
       categoryId,
@@ -1238,8 +1385,214 @@ app.prepare().then(() => {
       pickedByName: winner?.name,
     });
 
-    // Clean up dice duel state
-    room.state.diceDuel = null;
+    // Clean up dice royale state
+    room.state.diceRoyale = null;
+
+    setTimeout(() => {
+      startQuestion(room, io);
+    }, 2500);
+  }
+
+  // ============================================
+  // RPS DUEL - Rock Paper Scissors, Best of 3
+  // ============================================
+
+  function startRPSDuel(room: GameRoom, io: SocketServer) {
+    room.state.phase = 'category_rps_duel';
+    
+    const connectedPlayers = Array.from(room.players.values())
+      .filter(p => p.isConnected);
+    
+    if (connectedPlayers.length < 2) {
+      startCategoryVoting(room, io);
+      return;
+    }
+
+    // Shuffle and pick 2
+    const shuffled = [...connectedPlayers].sort(() => Math.random() - 0.5);
+    const player1 = shuffled[0];
+    const player2 = shuffled[1];
+
+    room.state.rpsDuel = {
+      player1Id: player1.id,
+      player2Id: player2.id,
+      player1Choices: [],
+      player2Choices: [],
+      player1Wins: 0,
+      player2Wins: 0,
+      currentRound: 1,
+      winnerId: null,
+      phase: 'selecting',
+    };
+
+    console.log(`✊✌️✋ RPS Duel: ${player1.name} vs ${player2.name}`);
+
+    emitPhaseChange(room, io, 'category_rps_duel');
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Send start event
+    setTimeout(() => {
+      io.to(room.code).emit('rps_duel_start', {
+        player1: { id: player1.id, name: player1.name, avatarSeed: player1.avatarSeed },
+        player2: { id: player2.id, name: player2.name, avatarSeed: player2.avatarSeed },
+      });
+    }, 500);
+
+    // Start first round after intro
+    setTimeout(() => {
+      if (room.state.rpsDuel) {
+        room.state.rpsDuel.phase = 'choosing';
+        startRPSRound(room, io);
+      }
+    }, 3000);
+  }
+
+  function startRPSRound(room: GameRoom, io: SocketServer) {
+    const duel = room.state.rpsDuel;
+    if (!duel) return;
+
+    room.state.timerEnd = Date.now() + 10000;
+    io.to(room.code).emit('rps_round_start', { round: duel.currentRound });
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Timeout - auto-choose for players who haven't chosen
+    setTimeout(() => {
+      if (room.state.phase === 'category_rps_duel' && duel.phase === 'choosing') {
+        const choices: RPSChoice[] = ['rock', 'paper', 'scissors'];
+        const p1CurrentChoice = duel.player1Choices[duel.currentRound - 1];
+        const p2CurrentChoice = duel.player2Choices[duel.currentRound - 1];
+
+        if (!p1CurrentChoice) {
+          const autoChoice = choices[Math.floor(Math.random() * 3)];
+          duel.player1Choices.push(autoChoice);
+          io.to(room.code).emit('rps_choice_made', { playerId: duel.player1Id });
+        }
+        if (!p2CurrentChoice) {
+          const autoChoice = choices[Math.floor(Math.random() * 3)];
+          duel.player2Choices.push(autoChoice);
+          io.to(room.code).emit('rps_choice_made', { playerId: duel.player2Id });
+        }
+        resolveRPSRound(room, io);
+      }
+    }, 10000);
+  }
+
+  function resolveRPSRound(room: GameRoom, io: SocketServer) {
+    const duel = room.state.rpsDuel;
+    if (!duel) return;
+
+    const p1Choice = duel.player1Choices[duel.currentRound - 1];
+    const p2Choice = duel.player2Choices[duel.currentRound - 1];
+
+    if (!p1Choice || !p2Choice) return;
+
+    duel.phase = 'revealing';
+
+    // Determine round winner
+    let roundWinner: 'player1' | 'player2' | 'tie' = 'tie';
+    if (p1Choice !== p2Choice) {
+      if (
+        (p1Choice === 'rock' && p2Choice === 'scissors') ||
+        (p1Choice === 'paper' && p2Choice === 'rock') ||
+        (p1Choice === 'scissors' && p2Choice === 'paper')
+      ) {
+        roundWinner = 'player1';
+        duel.player1Wins++;
+      } else {
+        roundWinner = 'player2';
+        duel.player2Wins++;
+      }
+    }
+
+    console.log(`✊✌️✋ Round ${duel.currentRound}: ${p1Choice} vs ${p2Choice} - Winner: ${roundWinner}`);
+
+    io.to(room.code).emit('rps_round_result', {
+      round: duel.currentRound,
+      player1Choice: p1Choice,
+      player2Choice: p2Choice,
+      roundWinner,
+      player1Wins: duel.player1Wins,
+      player2Wins: duel.player2Wins,
+    });
+
+    // Check for match winner (first to 2)
+    if (duel.player1Wins >= 2 || duel.player2Wins >= 2) {
+      // We have a match winner!
+      setTimeout(() => {
+        const winnerId = duel.player1Wins >= 2 ? duel.player1Id : duel.player2Id;
+        duel.winnerId = winnerId;
+        duel.phase = 'result';
+        room.state.loserPickPlayerId = winnerId;
+
+        const winner = room.players.get(winnerId);
+        console.log(`✊✌️✋ RPS Duel Winner: ${winner?.name}`);
+
+        // Notify bot manager about RPS duel winner
+        if (dev) {
+          botManager.onRPSDuelWinner(room.code, winnerId);
+        }
+
+        io.to(room.code).emit('rps_duel_winner', {
+          winnerId,
+          winnerName: winner?.name,
+          player1Wins: duel.player1Wins,
+          player2Wins: duel.player2Wins,
+        });
+        io.to(room.code).emit('room_update', roomToClient(room));
+
+        // Let winner pick
+        setTimeout(() => {
+          if (room.state.phase === 'category_rps_duel') {
+            startRPSDuelPick(room, io);
+          }
+        }, 3000);
+      }, 2500);
+    } else {
+      // Start next round
+      setTimeout(() => {
+        if (duel.currentRound < 3) {
+          duel.currentRound++;
+          duel.phase = 'choosing';
+          startRPSRound(room, io);
+        }
+      }, 2500);
+    }
+  }
+
+  function startRPSDuelPick(room: GameRoom, io: SocketServer) {
+    room.state.timerEnd = Date.now() + 15000;
+    io.to(room.code).emit('rps_duel_pick');
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Timeout fallback
+    setTimeout(() => {
+      if (room.state.phase === 'category_rps_duel' && room.state.rpsDuel?.phase === 'result') {
+        const randomCat = room.state.votingCategories[
+          Math.floor(Math.random() * room.state.votingCategories.length)
+        ];
+        finalizeRPSDuelPick(room, io, randomCat.id);
+      }
+    }, 15000);
+  }
+
+  function finalizeRPSDuelPick(room: GameRoom, io: SocketServer, categoryId: string) {
+    room.state.selectedCategory = categoryId;
+    room.state.roundQuestions = getRandomQuestions(categoryId, room.settings.questionsPerRound);
+    room.state.currentQuestionIndex = 0;
+
+    const categoryData = loadCategories().get(categoryId);
+    const winner = room.state.rpsDuel?.winnerId ? room.players.get(room.state.rpsDuel.winnerId) : null;
+    
+    io.to(room.code).emit('category_selected', { 
+      categoryId,
+      categoryName: categoryData?.name,
+      categoryIcon: categoryData?.icon,
+      pickedBy: winner?.id,
+      pickedByName: winner?.name,
+    });
+
+    // Clean up RPS duel state
+    room.state.rpsDuel = null;
 
     setTimeout(() => {
       startQuestion(room, io);

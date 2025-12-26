@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Vote, CircleDot, Crown, Sparkles, Swords } from 'lucide-react';
+import { Vote, CircleDot, Crown, Sparkles, Swords, Dices } from 'lucide-react';
 import { useGameStore } from '@/store/gameStore';
 
 const MODES: Record<string, { title: string; subtitle: string; icon: any; color: string; bgColor: string; emoji: string }> = {
@@ -29,13 +29,21 @@ const MODES: Record<string, { title: string; subtitle: string; icon: any; color:
     bgColor: 'bg-amber-500/20',
     emoji: '👑',
   },
-  dice_duel: {
-    title: 'Würfel-Duell!',
-    subtitle: 'Zwei Spieler treten gegeneinander an',
-    icon: Swords,
-    color: 'from-red-500 to-orange-500',
-    bgColor: 'bg-red-500/20',
+  dice_royale: {
+    title: 'Dice Royale!',
+    subtitle: 'Alle würfeln - der Höchste gewinnt!',
+    icon: Dices,
+    color: 'from-emerald-500 to-teal-500',
+    bgColor: 'bg-emerald-500/20',
     emoji: '🎲',
+  },
+  rps_duel: {
+    title: 'Schere, Stein, Papier!',
+    subtitle: 'Zwei Spieler im Duell - Best of 3',
+    icon: Swords,
+    color: 'from-red-500 to-rose-500',
+    bgColor: 'bg-red-500/20',
+    emoji: '✊',
   },
 };
 

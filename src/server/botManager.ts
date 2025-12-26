@@ -23,7 +23,8 @@ interface GameRoom {
   players: Map<string, any>;
   state: {
     phase: string;
-    diceDuel: any;
+    diceRoyale: any;
+    rpsDuel: any;
     loserPickPlayerId: string | null;
     votingCategories: any[];
     currentQuestion: any;
@@ -115,8 +116,11 @@ class BotManager {
       case 'category_voting':
         this.handleVotingPhase(botsInRoom, room);
         break;
-      case 'category_dice_duel':
-        this.handleDiceDuelPhase(botsInRoom, room);
+      case 'category_dice_royale':
+        this.handleDiceRoyalePhase(botsInRoom, room);
+        break;
+      case 'category_rps_duel':
+        this.handleRPSDuelPhase(botsInRoom, room);
         break;
       case 'category_losers_pick':
         this.handleLoserPickPhase(botsInRoom, room);
@@ -159,28 +163,27 @@ class BotManager {
   }
 
   /**
-   * Handle dice duel phase - bot rolls dice if selected
+   * Handle Dice Royale phase - all bots roll dice
    */
-  private handleDiceDuelPhase(bots: BotPlayer[], room: GameRoom) {
-    // Wait for the duel to be ready (rolling phase)
+  private handleDiceRoyalePhase(bots: BotPlayer[], room: GameRoom) {
+    // Wait for the royale to be ready (rolling phase)
     const checkAndRoll = () => {
-      const duel = room.state.diceDuel;
-      if (!duel || duel.phase !== 'rolling') return;
+      const royale = room.state.diceRoyale;
+      if (!royale || royale.phase !== 'rolling') return;
 
       for (const bot of bots) {
-        const isInDuel = bot.id === duel.player1Id || bot.id === duel.player2Id;
-        const hasRolled = 
-          (bot.id === duel.player1Id && duel.player1Rolls) ||
-          (bot.id === duel.player2Id && duel.player2Rolls);
+        const hasRolled = royale.playerRolls?.get?.(bot.id) !== null && royale.playerRolls?.get?.(bot.id) !== undefined;
+        // Check if in tie-breaker and bot is eligible
+        const isEligible = !royale.tiedPlayerIds || royale.tiedPlayerIds.includes(bot.id);
 
-        if (isInDuel && !hasRolled) {
-          const delay = this.randomDelay(500, 2000);
-          const timerId = `${bot.id}-dice`;
+        if (!hasRolled && isEligible) {
+          const delay = this.randomDelay(500, 3000);
+          const timerId = `${bot.id}-dice-royale`;
           
           const timer = setTimeout(() => {
-            console.log(`🤖 ${bot.name} rolls the dice!`);
+            console.log(`🤖 ${bot.name} rolls the dice (Dice Royale)!`);
             
-            this.triggerAction('dice_roll', {
+            this.triggerAction('dice_royale_roll', {
               roomCode: bot.roomCode,
               playerId: bot.id,
             });
@@ -194,7 +197,53 @@ class BotManager {
     };
 
     // Check after a delay (wait for rolling phase)
-    setTimeout(checkAndRoll, 3000);
+    setTimeout(checkAndRoll, 1000);
+  }
+
+  /**
+   * Handle RPS Duel phase - bots choose rock/paper/scissors
+   */
+  private handleRPSDuelPhase(bots: BotPlayer[], room: GameRoom) {
+    // Wait for the choosing phase
+    const checkAndChoose = () => {
+      const duel = room.state.rpsDuel;
+      if (!duel || duel.phase !== 'choosing') return;
+
+      for (const bot of bots) {
+        const isInDuel = bot.id === duel.player1Id || bot.id === duel.player2Id;
+        if (!isInDuel) continue;
+
+        const isPlayer1 = bot.id === duel.player1Id;
+        const currentIndex = duel.currentRound - 1;
+        const hasChosen = isPlayer1 
+          ? duel.player1Choices?.[currentIndex] 
+          : duel.player2Choices?.[currentIndex];
+
+        if (!hasChosen) {
+          const delay = this.randomDelay(1000, 4000);
+          const timerId = `${bot.id}-rps-${duel.currentRound}`;
+          
+          const timer = setTimeout(() => {
+            const choices = ['rock', 'paper', 'scissors'];
+            const choice = choices[Math.floor(Math.random() * 3)];
+            console.log(`🤖 ${bot.name} chooses ${choice} (RPS Duel)!`);
+            
+            this.triggerAction('rps_choice', {
+              roomCode: bot.roomCode,
+              playerId: bot.id,
+              choice,
+            });
+            
+            this.activeTimers.delete(timerId);
+          }, delay);
+          
+          this.activeTimers.set(timerId, timer);
+        }
+      }
+    };
+
+    // Check after a delay (wait for choosing phase)
+    setTimeout(checkAndChoose, 500);
   }
 
   /**
@@ -290,9 +339,9 @@ class BotManager {
   }
 
   /**
-   * Handle dice duel pick - bot picks category if they won
+   * Handle Dice Royale winner pick - bot picks category if they won
    */
-  onDiceDuelWinner(roomCode: string, winnerId: string) {
+  onDiceRoyaleWinner(roomCode: string, winnerId: string) {
     const bot = this.bots.get(winnerId);
     if (!bot) return;
 
@@ -303,13 +352,45 @@ class BotManager {
     if (!categories || categories.length === 0) return;
 
     const delay = this.randomDelay(1500, 4000);
-    const timerId = `${bot.id}-dicepick`;
+    const timerId = `${bot.id}-dice-royale-pick`;
     
     const timer = setTimeout(() => {
       const randomCategory = categories[Math.floor(Math.random() * categories.length)];
-      console.log(`🤖 ${bot.name} (dice winner) picks ${randomCategory.name}`);
+      console.log(`🤖 ${bot.name} (Dice Royale winner) picks ${randomCategory.name}`);
       
-      this.triggerAction('dice_duel_pick', {
+      this.triggerAction('dice_royale_pick', {
+        roomCode: bot.roomCode,
+        playerId: bot.id,
+        categoryId: randomCategory.id,
+      });
+      
+      this.activeTimers.delete(timerId);
+    }, delay);
+    
+    this.activeTimers.set(timerId, timer);
+  }
+
+  /**
+   * Handle RPS Duel winner pick - bot picks category if they won
+   */
+  onRPSDuelWinner(roomCode: string, winnerId: string) {
+    const bot = this.bots.get(winnerId);
+    if (!bot) return;
+
+    const room = this.getRoomFn?.(roomCode);
+    if (!room) return;
+
+    const categories = room.state.votingCategories;
+    if (!categories || categories.length === 0) return;
+
+    const delay = this.randomDelay(1500, 4000);
+    const timerId = `${bot.id}-rps-pick`;
+    
+    const timer = setTimeout(() => {
+      const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+      console.log(`🤖 ${bot.name} (RPS Duel winner) picks ${randomCategory.name}`);
+      
+      this.triggerAction('rps_duel_pick', {
         roomCode: bot.roomCode,
         playerId: bot.id,
         categoryId: randomCategory.id,

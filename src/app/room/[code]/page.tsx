@@ -15,7 +15,8 @@ import {
   VotingScreen,
   CategoryWheelScreen,
   LosersPickScreen,
-  DiceDuelScreen,
+  DiceRoyaleScreen,
+  RPSDuelScreen,
   QuestionScreen,
   EstimationScreen,
   RevealScreen,
@@ -118,8 +119,10 @@ export default function RoomPage() {
         return <CategoryWheelScreen key="wheel" />;
       case 'category_losers_pick':
         return <LosersPickScreen key="losers-pick" />;
-      case 'category_dice_duel':
-        return <DiceDuelScreen key="dice-duel" />;
+      case 'category_dice_royale':
+        return <DiceRoyaleScreen key="dice-royale" />;
+      case 'category_rps_duel':
+        return <RPSDuelScreen key="rps-duel" />;
       case 'question':
         return <QuestionScreen key="question" />;
       case 'estimation':

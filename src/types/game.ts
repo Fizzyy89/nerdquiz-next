@@ -58,7 +58,8 @@ export type GamePhase =
   | 'category_voting'
   | 'category_wheel'
   | 'category_losers_pick'
-  | 'category_dice_duel'
+  | 'category_dice_royale'
+  | 'category_rps_duel'
   | 'question'
   | 'estimation'
   | 'revealing'
@@ -66,15 +67,30 @@ export type GamePhase =
   | 'scoreboard'
   | 'final';
 
-export type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_duel';
+export type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_royale' | 'rps_duel';
 
-export interface DiceDuelState {
+// Dice Royale - All players roll, highest wins
+export interface DiceRoyaleState {
+  playerRolls: Record<string, number[] | null>; // playerId -> [die1, die2]
+  winnerId: string | null;
+  tiedPlayerIds: string[] | null; // Players who need to re-roll
+  phase: 'rolling' | 'reroll' | 'result';
+  round: number; // Track tie-breaker rounds
+}
+
+// Rock Paper Scissors Duel - 2 players, best of 3
+export type RPSChoice = 'rock' | 'paper' | 'scissors';
+
+export interface RPSDuelState {
   player1Id: string;
   player2Id: string;
-  player1Rolls: number[] | null;
-  player2Rolls: number[] | null;
+  player1Choices: RPSChoice[];
+  player2Choices: RPSChoice[];
+  player1Wins: number;
+  player2Wins: number;
+  currentRound: number; // 1, 2, or 3
   winnerId: string | null;
-  phase: 'selecting' | 'rolling' | 'result';
+  phase: 'selecting' | 'choosing' | 'revealing' | 'result';
 }
 
 export interface GameSettings {
@@ -97,7 +113,8 @@ export interface RoomState {
   categoryVotes: Record<string, string>;
   selectedCategory: string | null;
   loserPickPlayerId: string | null;
-  diceDuel: DiceDuelState | null;
+  diceRoyale: DiceRoyaleState | null;
+  rpsDuel: RPSDuelState | null;
   timerEnd: number | null;
   showingCorrectAnswer: boolean;
   wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
