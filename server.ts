@@ -624,6 +624,25 @@ app.prepare().then(() => {
       io.to(data.roomCode).emit('room_update', roomToClient(room));
     });
 
+    // === REROLL AVATAR ===
+    socket.on('reroll_avatar', (data: { roomCode: string; playerId: string }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room) return;
+      
+      // Only allow in lobby
+      if (room.state.phase !== 'lobby') return;
+      
+      const player = room.players.get(data.playerId);
+      if (!player) return;
+      
+      // Generate new avatar seed
+      player.avatarSeed = player.name + Date.now() + Math.random().toString(36).slice(2);
+      
+      console.log(`🎲 ${player.name} rerolled avatar`);
+      
+      io.to(data.roomCode).emit('room_update', roomToClient(room));
+    });
+
     // === START GAME ===
     socket.on('start_game', (data: { roomCode: string; playerId: string }, callback) => {
       const room = rooms.get(data.roomCode);

@@ -226,6 +226,13 @@ export function useSocket() {
     reset();
   }, [reset]);
 
+  const rerollAvatar = useCallback(() => {
+    const socket = getSocket();
+    const { playerId, roomCode } = useGameStore.getState();
+    if (!roomCode || !playerId) return;
+    socket.emit('reroll_avatar', { roomCode, playerId });
+  }, []);
+
   return {
     createRoom,
     joinRoom,
@@ -238,5 +245,6 @@ export function useSocket() {
     submitEstimation,
     next,
     leaveGame,
+    rerollAvatar,
   };
 }
