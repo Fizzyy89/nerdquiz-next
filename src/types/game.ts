@@ -145,6 +145,11 @@ export interface AnswerResult {
   estimation?: number;
   diff?: number; // Signed difference from correct answer
   absDiff?: number; // Absolute difference
+  rank?: number; // Ranking position (1 = best)
+  // Estimation scoring breakdown (accuracy-based)
+  accuracyPoints?: number; // Points based on how close the guess was
+  rankBonus?: number; // Bonus points for placement
+  perfectBonus?: number; // Bonus for exact answer
 }
 
 export interface FinalRanking {
