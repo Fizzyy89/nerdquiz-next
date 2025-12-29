@@ -181,26 +181,26 @@ async function runHealthChecks() {
         });
       }
 
-      // Prüfe Einheit
+      // Prüfe Einheit - bei Schätzfragen ist die Einheit Pflicht!
       if (unit === undefined || unit === null) {
         issues.push({
           ...questionInfo,
           id: `${q.id}-no-unit`,
-          type: 'warning',
+          type: 'error',
           message: 'Keine Einheit definiert',
         });
       } else if (typeof unit !== 'string') {
         issues.push({
           ...questionInfo,
           id: `${q.id}-wrong-type-unit`,
-          type: 'warning',
+          type: 'error',
           message: `Einheit hat falschen Typ: ${typeof unit}`,
         });
       } else if (unit.trim() === '') {
         issues.push({
           ...questionInfo,
           id: `${q.id}-empty-unit`,
-          type: 'warning',
+          type: 'error',
           message: 'Einheit ist leer',
         });
       }
