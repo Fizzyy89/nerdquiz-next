@@ -169,7 +169,7 @@ interface GameRoom {
     enableMediaQuestions: boolean; // Bild/Audio/Video Fragen
   };
   state: {
-    phase: 'lobby' | 'round_announcement' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_royale' | 'category_rps_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'bonus_round_announcement' | 'bonus_round' | 'bonus_round_result' | 'final';
+    phase: 'lobby' | 'round_announcement' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_royale' | 'category_rps_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'bonus_round_announcement' | 'bonus_round' | 'bonus_round_result' | 'final' | 'rematch_voting';
     currentRound: number;
     currentQuestionIndex: number;
     currentQuestion: GameQuestion | null;
@@ -189,6 +189,8 @@ interface GameRoom {
     // Duplikat-Vermeidung: bereits verwendete Fragen-IDs
     usedQuestionIds: Set<string>;
     usedBonusQuestionIds: Set<string>;
+    // Rematch Voting
+    rematchVotes: Map<string, 'yes' | 'no'>;
   };
   createdAt: Date;
 }
@@ -357,6 +359,7 @@ function roomToClient(room: GameRoom) {
     timerEnd: room.state.timerEnd,
     showingCorrectAnswer: room.state.showingCorrectAnswer,
     wheelSelectedIndex: room.state.wheelSelectedIndex,
+    rematchVotes: Object.fromEntries(room.state.rematchVotes),
   };
 }
 
@@ -591,6 +594,7 @@ app.prepare().then(async () => {
           wheelSelectedIndex: null,
           usedQuestionIds: new Set(),
           usedBonusQuestionIds: new Set(),
+          rematchVotes: new Map(),
         },
         createdAt: new Date(),
       };
@@ -932,6 +936,37 @@ app.prepare().then(async () => {
       handleBonusRoundSkip(room, io, data.playerId);
     });
 
+    // === REMATCH VOTE ===
+    socket.on('vote_rematch', (data: { roomCode: string; playerId: string; vote: 'yes' | 'no' }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'rematch_voting') return;
+      
+      const player = room.players.get(data.playerId);
+      if (!player || !player.isConnected) return;
+      
+      // Already voted?
+      if (room.state.rematchVotes.has(data.playerId)) return;
+      
+      room.state.rematchVotes.set(data.playerId, data.vote);
+      
+      console.log(`🗳️ ${player.name} voted ${data.vote} for rematch`);
+      
+      io.to(room.code).emit('rematch_vote_update', {
+        playerId: data.playerId,
+        playerName: player.name,
+        vote: data.vote,
+        totalVotes: room.state.rematchVotes.size,
+        totalPlayers: Array.from(room.players.values()).filter(p => p.isConnected).length,
+      });
+      io.to(room.code).emit('room_update', roomToClient(room));
+      
+      // Check if all connected players have voted
+      const connectedPlayers = Array.from(room.players.values()).filter(p => p.isConnected);
+      if (room.state.rematchVotes.size >= connectedPlayers.length) {
+        finalizeRematchVoting(room, io);
+      }
+    });
+
     // === NEXT (Host only) ===
     socket.on('next', (data: { roomCode: string; playerId: string }) => {
       const room = rooms.get(data.roomCode);
@@ -1225,11 +1260,15 @@ app.prepare().then(async () => {
     // === BONUSRUNDEN-LOGIK ===
     // Prüfen ob diese Runde eine Bonusrunde werden soll
     const isLastRound = room.state.currentRound === room.settings.maxRounds;
-    const shouldBeBonusRound = 
-      (isLastRound && room.settings.finalRoundAlwaysBonus) ||
-      (!isLastRound && room.settings.bonusRoundChance > 0 && Math.random() * 100 < room.settings.bonusRoundChance);
     
-    console.log(`🎮 Round ${room.state.currentRound}/${room.settings.maxRounds} - isLastRound: ${isLastRound}, shouldBeBonusRound: ${shouldBeBonusRound}`);
+    // Bonusrunde wenn:
+    // 1. Letzte Runde UND "Finale = Bonusrunde" aktiviert, ODER
+    // 2. Zufalls-Check basierend auf bonusRoundChance (gilt für ALLE Runden inkl. letzte)
+    const chanceTriggered = room.settings.bonusRoundChance > 0 && Math.random() * 100 < room.settings.bonusRoundChance;
+    const shouldBeBonusRound = 
+      (isLastRound && room.settings.finalRoundAlwaysBonus) || chanceTriggered;
+    
+    console.log(`🎮 Round ${room.state.currentRound}/${room.settings.maxRounds} - isLastRound: ${isLastRound}, chanceTriggered: ${chanceTriggered}, shouldBeBonusRound: ${shouldBeBonusRound}`);
 
     if (shouldBeBonusRound) {
       console.log(`🎯 Round ${room.state.currentRound}: BONUS ROUND triggered!`);
@@ -2204,6 +2243,154 @@ app.prepare().then(async () => {
       }));
 
     io.to(room.code).emit('game_over', { rankings: finalRankings });
+    io.to(room.code).emit('room_update', roomToClient(room));
+    
+    // Nach 8 Sekunden (Zeit für Confetti etc.) das Rematch-Voting starten
+    setTimeout(() => {
+      if (room.state.phase === 'final') {
+        startRematchVoting(room, io);
+      }
+    }, 8000);
+  }
+
+  function startRematchVoting(room: GameRoom, io: SocketServer) {
+    room.state.phase = 'rematch_voting';
+    room.state.rematchVotes = new Map();
+    room.state.timerEnd = Date.now() + 20000; // 20 Sekunden zum Voten
+    
+    console.log(`🗳️ Rematch voting started in room ${room.code}`);
+    
+    emitPhaseChange(room, io, 'rematch_voting');
+    io.to(room.code).emit('rematch_voting_start', {
+      timerEnd: room.state.timerEnd,
+    });
+    io.to(room.code).emit('room_update', roomToClient(room));
+    
+    // Timeout für Voting
+    setTimeout(() => {
+      if (room.state.phase === 'rematch_voting') {
+        // Alle die nicht gevotet haben, zählen als "nein"
+        const connectedPlayers = Array.from(room.players.values()).filter(p => p.isConnected);
+        connectedPlayers.forEach(p => {
+          if (!room.state.rematchVotes.has(p.id)) {
+            room.state.rematchVotes.set(p.id, 'no');
+          }
+        });
+        finalizeRematchVoting(room, io);
+      }
+    }, 20000);
+  }
+
+  function finalizeRematchVoting(room: GameRoom, io: SocketServer) {
+    const votes = room.state.rematchVotes;
+    const yesVoters: string[] = [];
+    const noVoters: string[] = [];
+    
+    votes.forEach((vote, playerId) => {
+      if (vote === 'yes') yesVoters.push(playerId);
+      else noVoters.push(playerId);
+    });
+    
+    console.log(`🗳️ Rematch voting result: ${yesVoters.length} yes, ${noVoters.length} no`);
+    
+    if (yesVoters.length === 0) {
+      // Niemand will weiterspielen - Raum schließen
+      io.to(room.code).emit('rematch_result', {
+        rematch: false,
+        message: 'Niemand wollte weiterspielen. Danke fürs Spielen!',
+      });
+      
+      // Clean up after a short delay
+      setTimeout(() => {
+        if (dev) {
+          botManager.cleanupRoom(room.code);
+        }
+        rooms.delete(room.code);
+        console.log(`🗑️ Room ${room.code} closed after rematch voting`);
+      }, 5000);
+      return;
+    }
+    
+    // Mindestens einer will weiterspielen - zurück zur Lobby
+    // Neuer Host: Alter Host wenn er "ja" gesagt hat, sonst erster Ja-Sager
+    let newHostId = room.hostId;
+    const currentHost = room.players.get(room.hostId);
+    
+    if (!currentHost || !currentHost.isConnected || votes.get(room.hostId) !== 'yes') {
+      // Alter Host spielt nicht mit - neuen Host wählen
+      newHostId = yesVoters[0];
+    }
+    
+    // Spieler die "nein" gesagt haben, entfernen
+    noVoters.forEach(playerId => {
+      const player = room.players.get(playerId);
+      if (player) {
+        // Benachrichtige den Spieler bevor er entfernt wird
+        const playerSocket = Array.from(io.sockets.sockets.values())
+          .find(s => s.id === player.socketId);
+        if (playerSocket) {
+          playerSocket.emit('kicked_from_room', { reason: 'Du hast gegen eine weitere Runde gestimmt.' });
+          playerSocket.leave(room.code);
+        }
+      }
+      room.players.delete(playerId);
+    });
+    
+    // Host-Status aktualisieren
+    room.players.forEach(p => p.isHost = false);
+    const newHost = room.players.get(newHostId);
+    if (newHost) {
+      newHost.isHost = true;
+      room.hostId = newHostId;
+    }
+    
+    // Scores und Streaks zurücksetzen
+    room.players.forEach(p => {
+      p.score = 0;
+      p.streak = 0;
+      p.currentAnswer = null;
+      p.estimationAnswer = null;
+      p.answerTime = null;
+    });
+    
+    // Spielstatus zurücksetzen
+    room.state = {
+      phase: 'lobby',
+      currentRound: 1,
+      currentQuestionIndex: 0,
+      currentQuestion: null,
+      categorySelectionMode: null,
+      votingCategories: [],
+      categoryVotes: new Map(),
+      selectedCategory: null,
+      roundQuestions: [],
+      timerEnd: null,
+      showingCorrectAnswer: false,
+      loserPickPlayerId: null,
+      lastLoserPickRound: 0,
+      diceRoyale: null,
+      rpsDuel: null,
+      bonusRound: null,
+      wheelSelectedIndex: null,
+      usedQuestionIds: new Set(),
+      usedBonusQuestionIds: new Set(),
+      rematchVotes: new Map(),
+    };
+    
+    console.log(`🔄 Room ${room.code} reset for rematch. New host: ${newHost?.name}, ${room.players.size} players remaining`);
+    
+    io.to(room.code).emit('rematch_result', {
+      rematch: true,
+      newHostId,
+      newHostName: newHost?.name,
+      remainingPlayers: Array.from(room.players.values()).map(p => ({
+        id: p.id,
+        name: p.name,
+        avatarSeed: p.avatarSeed,
+      })),
+    });
+    
+    emitPhaseChange(room, io, 'lobby');
     io.to(room.code).emit('room_update', roomToClient(room));
   }
 

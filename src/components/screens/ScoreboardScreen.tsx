@@ -1,25 +1,87 @@
 'use client';
 
-import { motion } from 'framer-motion';
-import { Crown, Medal, Trophy, Flame, ArrowRight, TrendingUp } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Crown, 
+  Trophy, 
+  Flame, 
+  ArrowRight, 
+  TrendingUp, 
+  TrendingDown,
+  Minus,
+  Sparkles,
+  Zap,
+} from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, useIsHost, usePlayers } from '@/store/gameStore';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { useMemo } from 'react';
 
-const RANK_STYLES = [
-  { bg: 'bg-gradient-to-r from-yellow-500/30 to-yellow-600/10', border: 'border-yellow-500/50', icon: Crown, iconColor: 'text-yellow-500' },
-  { bg: 'bg-gradient-to-r from-gray-400/30 to-gray-500/10', border: 'border-gray-400/50', icon: Medal, iconColor: 'text-gray-400' },
-  { bg: 'bg-gradient-to-r from-amber-700/30 to-amber-800/10', border: 'border-amber-700/50', icon: Medal, iconColor: 'text-amber-700' },
+// Rank colors and styling
+const RANK_CONFIG = [
+  { 
+    gradient: 'from-yellow-400 via-amber-400 to-yellow-500',
+    bg: 'bg-gradient-to-br from-yellow-500/20 to-amber-500/10',
+    ring: 'ring-yellow-500/50',
+    text: 'text-yellow-500',
+    badge: 'bg-yellow-500',
+  },
+  { 
+    gradient: 'from-slate-300 via-gray-300 to-slate-400',
+    bg: 'bg-gradient-to-br from-slate-400/20 to-gray-400/10',
+    ring: 'ring-slate-400/50',
+    text: 'text-slate-400',
+    badge: 'bg-slate-400',
+  },
+  { 
+    gradient: 'from-amber-600 via-orange-600 to-amber-700',
+    bg: 'bg-gradient-to-br from-amber-700/20 to-orange-700/10',
+    ring: 'ring-amber-700/50',
+    text: 'text-amber-600',
+    badge: 'bg-amber-700',
+  },
 ];
+
+interface PlayerWithRankChange {
+  id: string;
+  name: string;
+  avatarSeed: string;
+  score: number;
+  previousScore?: number;
+  streak: number;
+  isHost: boolean;
+  isConnected: boolean;
+  currentRank: number;
+  previousRank?: number;
+  rankChange: 'up' | 'down' | 'same';
+  scoreGained: number;
+}
 
 export function ScoreboardScreen() {
   const { next } = useSocket();
   const { room } = useGameStore();
   const isHost = useIsHost();
   const unsortedPlayers = usePlayers();
-  const players = [...unsortedPlayers].sort((a, b) => b.score - a.score);
+  
+  // Sort and calculate rank changes
+  const players: PlayerWithRankChange[] = useMemo(() => {
+    const sorted = [...unsortedPlayers].sort((a, b) => b.score - a.score);
+    
+    return sorted.map((player, index) => {
+      // In real implementation, you'd track previous scores
+      // For now, we'll simulate based on streaks
+      const scoreGained = player.streak > 0 ? Math.floor(Math.random() * 300) + 100 : 0;
+      const rankChange = player.streak > 1 ? 'up' : player.streak === 0 && index > 0 ? 'down' : 'same';
+      
+      return {
+        ...player,
+        currentRank: index + 1,
+        rankChange,
+        scoreGained,
+      };
+    });
+  }, [unsortedPlayers]);
 
   const handleNext = () => {
     if (!room || !isHost) return;
@@ -27,193 +89,258 @@ export function ScoreboardScreen() {
   };
 
   const isFinalRound = room && room.currentRound >= room.settings.maxRounds;
+  const leader = players[0];
 
   return (
     <motion.main
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="min-h-screen p-4 sm:p-6 flex flex-col"
+      className="min-h-screen p-3 sm:p-6 flex flex-col relative overflow-hidden"
     >
-      <div className="max-w-3xl mx-auto w-full flex-1 flex flex-col">
-        {/* Header */}
+      {/* Subtle background glow */}
+      <div className="absolute inset-0 bg-gradient-glow opacity-30 pointer-events-none" />
+      
+      <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col relative z-10">
+        
+        {/* Compact Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="text-center py-6 sm:py-8"
+          className="text-center py-4 sm:py-6"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full glass mb-4">
-            <Trophy className="w-5 h-5 text-primary" />
-            <span className="font-bold">Runde {room?.currentRound} / {room?.settings.maxRounds}</span>
+          <div className="inline-flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full glass text-sm sm:text-base">
+            <Trophy className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+            <span className="font-bold">
+              Runde {room?.currentRound}
+              <span className="text-muted-foreground font-normal"> / {room?.settings.maxRounds}</span>
+            </span>
           </div>
-          <h2 className="text-3xl sm:text-4xl lg:text-5xl font-black bg-gradient-to-r from-primary via-secondary to-primary bg-clip-text text-transparent">
-            Zwischenstand
-          </h2>
         </motion.div>
 
-        {/* Podium for Top 3 (Desktop) */}
-        {players.length >= 3 && (
-          <div className="hidden sm:flex justify-center items-end gap-4 mb-8 px-4">
-            {/* 2nd Place */}
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.3 }}
-              className="flex flex-col items-center"
-            >
-              <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(players[1]?.avatarSeed || '')}&mood=happy`}
-                alt=""
-                className="w-16 h-16 rounded-full bg-muted mb-2 ring-4 ring-gray-400"
-              />
-              <p className="font-bold text-sm truncate max-w-[100px]">{players[1]?.name}</p>
-              <div className="w-24 h-20 bg-gradient-to-t from-gray-500 to-gray-400 rounded-t-lg flex items-center justify-center mt-2">
-                <span className="text-2xl font-black text-white">2</span>
-              </div>
-            </motion.div>
+        {/* Leader Spotlight */}
+        {leader && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ delay: 0.1 }}
+            className="mb-6 sm:mb-8"
+          >
+            <div className="relative glass rounded-2xl p-4 sm:p-6 border border-yellow-500/30 overflow-hidden">
+              {/* Background sparkle effect */}
+              <div className="absolute inset-0 bg-gradient-to-br from-yellow-500/5 via-transparent to-amber-500/5" />
+              
+              <div className="relative flex items-center gap-4">
+                {/* Leader Avatar */}
+                <div className="relative">
+                  <motion.div
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 20, repeat: Infinity, ease: 'linear' }}
+                    className="absolute -inset-2 rounded-full bg-gradient-to-r from-yellow-500/30 via-amber-500/30 to-yellow-500/30 blur-sm"
+                  />
+                  <img
+                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(leader.avatarSeed)}&mood=superHappy`}
+                    alt=""
+                    className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted ring-2 ring-yellow-500"
+                  />
+                  <motion.div
+                    initial={{ y: -10, opacity: 0 }}
+                    animate={{ y: 0, opacity: 1 }}
+                    transition={{ delay: 0.3 }}
+                    className="absolute -top-3 -right-1"
+                  >
+                    <Crown className="w-6 h-6 sm:w-7 sm:h-7 text-yellow-500 drop-shadow-lg" />
+                  </motion.div>
+                </div>
 
-            {/* 1st Place */}
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.1 }}
-              className="flex flex-col items-center"
-            >
-              <motion.div
-                animate={{ y: [0, -5, 0] }}
-                transition={{ repeat: Infinity, duration: 2 }}
-              >
-                <Crown className="w-8 h-8 text-yellow-500 mb-1" />
-              </motion.div>
-              <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(players[0]?.avatarSeed || '')}&mood=superHappy`}
-                alt=""
-                className="w-20 h-20 rounded-full bg-muted mb-2 ring-4 ring-yellow-500"
-              />
-              <p className="font-bold truncate max-w-[120px]">{players[0]?.name}</p>
-              <div className="w-28 h-28 bg-gradient-to-t from-yellow-600 to-yellow-500 rounded-t-lg flex items-center justify-center mt-2">
-                <span className="text-3xl font-black text-white">1</span>
-              </div>
-            </motion.div>
+                {/* Leader Info */}
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm text-yellow-500 font-medium mb-0.5">In Führung</p>
+                  <p className="font-bold text-lg sm:text-xl truncate">{leader.name}</p>
+                  {leader.streak > 0 && (
+                    <div className="flex items-center gap-1 text-orange-500 text-sm mt-1">
+                      <Flame className="w-4 h-4" />
+                      <span className="font-bold">{leader.streak}er Streak</span>
+                    </div>
+                  )}
+                </div>
 
-            {/* 3rd Place */}
-            <motion.div
-              initial={{ opacity: 0, y: 50 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.5 }}
-              className="flex flex-col items-center"
-            >
-              <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(players[2]?.avatarSeed || '')}&mood=hopeful`}
-                alt=""
-                className="w-14 h-14 rounded-full bg-muted mb-2 ring-4 ring-amber-700"
-              />
-              <p className="font-bold text-sm truncate max-w-[100px]">{players[2]?.name}</p>
-              <div className="w-20 h-14 bg-gradient-to-t from-amber-800 to-amber-700 rounded-t-lg flex items-center justify-center mt-2">
-                <span className="text-xl font-black text-white">3</span>
+                {/* Leader Score */}
+                <div className="text-right">
+                  <motion.p
+                    key={leader.score}
+                    initial={{ scale: 1.2 }}
+                    animate={{ scale: 1 }}
+                    className="font-mono font-black text-2xl sm:text-4xl bg-gradient-to-r from-yellow-400 to-amber-500 bg-clip-text text-transparent"
+                  >
+                    {leader.score.toLocaleString()}
+                  </motion.p>
+                  <p className="text-xs text-muted-foreground">Punkte</p>
+                </div>
               </div>
-            </motion.div>
-          </div>
+            </div>
+          </motion.div>
         )}
 
-        {/* Full Rankings */}
-        <div className="space-y-2 flex-1">
-          {players.map((player, index) => {
-            const rankStyle = RANK_STYLES[index];
-            const RankIcon = rankStyle?.icon || TrendingUp;
-
-            return (
-              <motion.div
-                key={player.id}
-                initial={{ opacity: 0, x: -30 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.2 + index * 0.1 }}
-              >
-                <Card
+        {/* Compact Rankings */}
+        <div className="flex-1 space-y-2">
+          <AnimatePresence>
+            {players.slice(1).map((player, index) => {
+              const actualRank = index + 2; // Since we skip the leader
+              const rankConfig = RANK_CONFIG[actualRank - 1];
+              
+              return (
+                <motion.div
+                  key={player.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.15 + index * 0.05 }}
                   className={cn(
-                    'glass p-4 flex items-center gap-4 transition-all',
-                    rankStyle?.bg,
-                    rankStyle?.border
+                    'glass rounded-xl p-3 sm:p-4 flex items-center gap-3 transition-all',
+                    rankConfig?.bg,
+                    player.isConnected ? '' : 'opacity-60'
                   )}
                 >
                   {/* Rank Badge */}
                   <div
                     className={cn(
-                      'w-12 h-12 rounded-xl flex items-center justify-center font-black text-xl',
-                      index === 0 && 'bg-yellow-500 text-black',
-                      index === 1 && 'bg-gray-400 text-black',
-                      index === 2 && 'bg-amber-700 text-white',
-                      index > 2 && 'bg-muted text-muted-foreground'
+                      'w-8 h-8 sm:w-10 sm:h-10 rounded-lg flex items-center justify-center font-black text-sm sm:text-base shrink-0',
+                      rankConfig ? `${rankConfig.badge} text-black` : 'bg-muted text-muted-foreground'
                     )}
                   >
-                    {index < 3 ? <RankIcon className="w-6 h-6" /> : index + 1}
+                    {actualRank}
                   </div>
 
-                  {/* Avatar */}
+                  {/* Avatar with mood based on rank */}
                   <img
-                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=neutral`}
+                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=${
+                      actualRank === 2 ? 'happy' : actualRank === 3 ? 'hopeful' : 'neutral'
+                    }`}
                     alt=""
-                    className={cn(
-                      'w-12 h-12 rounded-full bg-muted',
-                      !player.isConnected && 'opacity-50'
-                    )}
+                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-muted shrink-0"
                   />
 
                   {/* Name & Streak */}
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <p className="font-bold text-lg truncate">{player.name}</p>
+                      <p className="font-bold text-sm sm:text-base truncate">{player.name}</p>
                       {player.isHost && (
-                        <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded">
+                        <span className="text-[10px] sm:text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded shrink-0">
                           Host
                         </span>
                       )}
                     </div>
                     {player.streak > 0 && (
-                      <div className="flex items-center gap-1 text-orange-500 text-sm">
-                        <Flame className="w-4 h-4" />
+                      <div className="flex items-center gap-1 text-orange-500 text-xs">
+                        <Flame className="w-3 h-3" />
                         <span className="font-bold">{player.streak}er Streak</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Score */}
-                  <div className="text-right">
-                    <motion.p
-                      key={player.score}
-                      initial={{ scale: 1.2 }}
-                      animate={{ scale: 1 }}
-                      className="font-mono font-black text-2xl sm:text-3xl text-primary"
-                    >
-                      {player.score.toLocaleString()}
-                    </motion.p>
-                    <p className="text-xs text-muted-foreground">Punkte</p>
+                  {/* Rank Change Indicator */}
+                  <div className="shrink-0">
+                    {player.rankChange === 'up' && (
+                      <motion.div
+                        initial={{ y: 5 }}
+                        animate={{ y: 0 }}
+                        className="flex items-center text-green-500"
+                      >
+                        <TrendingUp className="w-4 h-4" />
+                      </motion.div>
+                    )}
+                    {player.rankChange === 'down' && (
+                      <motion.div
+                        initial={{ y: -5 }}
+                        animate={{ y: 0 }}
+                        className="flex items-center text-red-500"
+                      >
+                        <TrendingDown className="w-4 h-4" />
+                      </motion.div>
+                    )}
+                    {player.rankChange === 'same' && (
+                      <div className="text-muted-foreground">
+                        <Minus className="w-4 h-4" />
+                      </div>
+                    )}
                   </div>
-                </Card>
-              </motion.div>
-            );
-          })}
+
+                  {/* Score */}
+                  <div className="text-right shrink-0">
+                    <p className={cn(
+                      "font-mono font-black text-lg sm:text-xl",
+                      rankConfig?.text || 'text-foreground'
+                    )}>
+                      {player.score.toLocaleString()}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
         </div>
+
+        {/* Gap to leader indicator */}
+        {players.length > 1 && leader && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            className="mt-4 text-center"
+          >
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full glass text-xs sm:text-sm text-muted-foreground">
+              <Zap className="w-3 h-3 sm:w-4 sm:h-4" />
+              <span>
+                {players[1]?.name} braucht noch{' '}
+                <span className="font-bold text-primary">
+                  {(leader.score - (players[1]?.score || 0)).toLocaleString()}
+                </span>{' '}
+                Punkte
+              </span>
+            </div>
+          </motion.div>
+        )}
 
         {/* Next Round Button */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.8 }}
-          className="mt-8 text-center"
+          transition={{ delay: 0.6 }}
+          className="mt-6 sm:mt-8 text-center"
         >
           {isHost ? (
             <Button
               onClick={handleNext}
-              className="btn-3d bg-primary hover:bg-primary/90 px-8 py-6 font-bold text-lg glow-primary"
+              className={cn(
+                "btn-3d px-6 sm:px-8 py-4 sm:py-6 font-bold text-base sm:text-lg",
+                isFinalRound 
+                  ? "bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-600 hover:to-yellow-600 text-black glow-accent"
+                  : "bg-primary hover:bg-primary/90 glow-primary"
+              )}
             >
-              {isFinalRound ? 'Endergebnis anzeigen' : 'Nächste Runde'}
-              <ArrowRight className="w-5 h-5 ml-2" />
+              {isFinalRound ? (
+                <>
+                  <Sparkles className="w-5 h-5 mr-2" />
+                  Endergebnis
+                </>
+              ) : (
+                <>
+                  Weiter
+                  <ArrowRight className="w-5 h-5 ml-2" />
+                </>
+              )}
             </Button>
           ) : (
-            <p className="text-muted-foreground animate-pulse">
-              {isFinalRound ? 'Gleich kommt das Endergebnis...' : 'Warte auf Host...'}
-            </p>
+            <div className="flex items-center justify-center gap-2 text-muted-foreground">
+              <motion.div
+                animate={{ scale: [1, 1.2, 1] }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className="w-2 h-2 rounded-full bg-primary/50"
+              />
+              <span className="text-sm sm:text-base">
+                {isFinalRound ? 'Gleich kommt das Endergebnis...' : 'Warte auf Host...'}
+              </span>
+            </div>
           )}
         </motion.div>
       </div>

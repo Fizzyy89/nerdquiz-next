@@ -139,6 +139,7 @@ export default function RoomPage() {
       case 'bonus_round_result':
         return <BonusRoundScreen key="bonus-round" />;
       case 'final':
+      case 'rematch_voting':
         return <FinalScreen key="final" />;
       default:
         return null;

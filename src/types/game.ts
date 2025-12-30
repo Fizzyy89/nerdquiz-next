@@ -75,7 +75,8 @@ export type GamePhase =
   | 'bonus_round_announcement' // NEU: Bonusrunden-Ankündigung mit Roulette
   | 'bonus_round'
   | 'bonus_round_result'
-  | 'final';
+  | 'final'
+  | 'rematch_voting'; // NEU: "Nochmal spielen?" Voting
 
 // CategorySelectionMode is now exported from @/config/gameModes.shared
 
@@ -187,6 +188,7 @@ export interface RoomState {
   timerEnd: number | null;
   showingCorrectAnswer: boolean;
   wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
+  rematchVotes: Record<string, 'yes' | 'no'>; // Rematch voting state
 }
 
 // ============================================
@@ -227,6 +229,22 @@ export interface FinalRanking {
   name: string;
   score: number;
   avatarSeed: string;
+}
+
+// ============================================
+// REMATCH VOTING
+// ============================================
+
+export interface RematchVote {
+  playerId: string;
+  playerName: string;
+  avatarSeed: string;
+  vote: 'yes' | 'no' | null; // null = hasn't voted yet
+}
+
+export interface RematchVotingState {
+  votes: Record<string, 'yes' | 'no'>; // playerId -> vote
+  timerEnd: number;
 }
 
 // ============================================

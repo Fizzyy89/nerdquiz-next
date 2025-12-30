@@ -255,6 +255,13 @@ export function useSocket() {
     socket.emit('bonus_round_skip', { roomCode, playerId });
   }, []);
 
+  const voteRematch = useCallback((vote: 'yes' | 'no') => {
+    const socket = getSocket();
+    const { playerId, roomCode } = useGameStore.getState();
+    if (!roomCode || !playerId) return;
+    socket.emit('vote_rematch', { roomCode, playerId, vote });
+  }, []);
+
   return {
     createRoom,
     joinRoom,
@@ -270,5 +277,6 @@ export function useSocket() {
     rerollAvatar,
     submitBonusRoundAnswer,
     skipBonusRound,
+    voteRematch,
   };
 }
