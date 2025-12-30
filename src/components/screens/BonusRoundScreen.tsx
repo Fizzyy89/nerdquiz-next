@@ -32,7 +32,8 @@ export function BonusRoundScreen() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [lastResult, setLastResult] = useState<'correct' | 'wrong' | 'already_guessed' | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const lastTurnNumberRef = useRef<number | null>(null);
+  // Track the last turn we processed to avoid double-clearing
+  const processedTurnRef = useRef<string | null>(null);
 
   const bonusRound = room?.bonusRound as BonusRoundState | null;
   const isMyTurn = bonusRound?.currentTurn?.playerId === playerId;
@@ -56,17 +57,27 @@ export function BonusRoundScreen() {
 
   // Auto-focus input when it's my turn (only on actual turn change)
   useEffect(() => {
-    const currentTurnNumber = bonusRound?.currentTurn?.turnNumber ?? null;
+    const currentTurnNumber = bonusRound?.currentTurn?.turnNumber;
+    const currentTurnPlayerId = bonusRound?.currentTurn?.playerId;
     
-    // Only reset if it's a NEW turn (turn number actually changed)
-    if (isMyTurn && currentTurnNumber !== null && currentTurnNumber !== lastTurnNumberRef.current) {
-      lastTurnNumberRef.current = currentTurnNumber;
+    // Create a unique key for this specific turn: "turnNumber-playerId"
+    // This ensures we only clear once per actual turn, not on every room_update
+    const turnKey = currentTurnNumber && currentTurnPlayerId 
+      ? `${currentTurnNumber}-${currentTurnPlayerId}` 
+      : null;
+    
+    // Only reset if:
+    // 1. It's my turn
+    // 2. We have a valid turn key
+    // 3. This is a NEW turn (different from what we already processed)
+    if (isMyTurn && turnKey && turnKey !== processedTurnRef.current) {
+      processedTurnRef.current = turnKey;
       setInputValue('');
       setLastResult(null);
       // Focus with slight delay to ensure input is mounted
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }, [isMyTurn, bonusRound?.currentTurn?.turnNumber]);
+  }, [isMyTurn, bonusRound?.currentTurn?.turnNumber, bonusRound?.currentTurn?.playerId]);
 
   // Clear last result after delay
   useEffect(() => {
