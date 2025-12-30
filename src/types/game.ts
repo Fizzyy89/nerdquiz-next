@@ -2,6 +2,10 @@
  * Shared Game Types
  */
 
+// Import and re-export CategorySelectionMode from central config
+import type { CategorySelectionMode } from '@/config/gameModes.shared';
+export type { CategorySelectionMode };
+
 // ============================================
 // PLAYER
 // ============================================
@@ -56,7 +60,8 @@ export interface Question {
 
 export type GamePhase = 
   | 'lobby'
-  | 'category_announcement'
+  | 'round_announcement'      // NEU: Rundenankündigung mit Roulette
+  | 'category_announcement'   // Legacy: wird zu round_announcement migriert
   | 'category_voting'
   | 'category_wheel'
   | 'category_losers_pick'
@@ -67,9 +72,12 @@ export type GamePhase =
   | 'revealing'
   | 'estimation_reveal'
   | 'scoreboard'
+  | 'bonus_round_announcement' // NEU: Bonusrunden-Ankündigung mit Roulette
+  | 'bonus_round'
+  | 'bonus_round_result'
   | 'final';
 
-export type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_royale' | 'rps_duel';
+// CategorySelectionMode is now exported from @/config/gameModes.shared
 
 // Dice Royale - All players roll, highest wins
 export interface DiceRoyaleState {
@@ -95,10 +103,68 @@ export interface RPSDuelState {
   phase: 'selecting' | 'choosing' | 'revealing' | 'result';
 }
 
+// ============================================
+// BONUS ROUND - Collective List
+// ============================================
+
+export interface BonusRoundItem {
+  id: string;
+  display: string;
+  group?: string; // Optional grouping (e.g., "West", "East")
+  guessedBy?: string; // Player ID who guessed it
+  guessedByName?: string;
+  guessedAt?: number; // Timestamp
+}
+
+export interface BonusRoundState {
+  phase: 'intro' | 'playing' | 'finished';
+  topic: string;
+  description?: string;
+  category?: string;
+  categoryIcon?: string;
+  questionType?: string; // z.B. "Liste", "Sortieren"
+  totalItems: number;
+  items: BonusRoundItem[]; // All items (revealed ones have guessedBy set)
+  revealedCount: number;
+  currentTurn: {
+    playerId: string;
+    playerName: string;
+    avatarSeed: string;
+    turnNumber: number;
+    timerEnd: number;
+  } | null;
+  turnOrder: string[]; // Player IDs in play order (worst to best score)
+  activePlayers: string[]; // Players still in the round
+  eliminatedPlayers: Array<{
+    playerId: string;
+    playerName: string;
+    avatarSeed: string;
+    eliminationReason: 'wrong' | 'timeout' | 'skip';
+    rank: number; // Final rank (1 = winner, higher = earlier elimination)
+  }>;
+  lastGuess?: {
+    playerId: string;
+    playerName: string;
+    input: string;
+    result: 'correct' | 'wrong' | 'already_guessed' | 'timeout' | 'skip';
+    matchedDisplay?: string;
+    confidence?: number;
+  };
+  pointsPerCorrect: number;
+  timePerTurn: number;
+  fuzzyThreshold: number;
+}
+
 export interface GameSettings {
   maxRounds: number;
   questionsPerRound: number;
   timePerQuestion: number;
+  // Bonusrunden-Einstellungen
+  bonusRoundChance: number; // 0-100, Wahrscheinlichkeit dass eine Runde zur Bonusrunde wird
+  finalRoundAlwaysBonus: boolean; // Letzte Runde immer als Bonusrunde
+  // Zukünftige Erweiterungen
+  enableEstimation: boolean; // Schätzfragen aktiviert
+  enableMediaQuestions: boolean; // Bild/Audio/Video Fragen
 }
 
 export interface RoomState {
@@ -117,6 +183,7 @@ export interface RoomState {
   loserPickPlayerId: string | null;
   diceRoyale: DiceRoyaleState | null;
   rpsDuel: RPSDuelState | null;
+  bonusRound: BonusRoundState | null;
   timerEnd: number | null;
   showingCorrectAnswer: boolean;
   wheelSelectedIndex: number | null; // Pre-selected wheel index for animation

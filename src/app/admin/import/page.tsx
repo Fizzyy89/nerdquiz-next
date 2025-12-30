@@ -1,4 +1,6 @@
-import { Suspense } from 'react';
+'use client';
+
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { 
   Upload, 
   FileJson, 
@@ -7,236 +9,941 @@ import {
   CheckCircle2,
   Clock,
   Info,
+  Languages,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  FolderOpen,
+  X,
+  Eye,
+  Check,
+  Import,
+  Settings,
+  Key,
 } from 'lucide-react';
-import { prisma } from '@/lib/db';
 import { Badge } from '@/components/ui/badge';
 
-// Force dynamic rendering (no static generation during build)
-export const dynamic = 'force-dynamic';
-
-async function getImportLogs() {
-  return prisma.importLog.findMany({
-    orderBy: { createdAt: 'desc' },
-    take: 20,
-  });
+interface OpenTDBQuestion {
+  type: string;
+  difficulty: string;
+  category: string;
+  question: string;
+  correct_answer: string;
+  incorrect_answers: string[];
+  _translated?: boolean;
+  _selected?: boolean;
+  _duplicate?: boolean;
+  _duplicateCategory?: string;
+  _originalQuestion?: string; // Original English question for duplicate detection
+  _originalCorrectAnswer?: string;
+  _originalIncorrectAnswers?: string[];
 }
 
-async function ImportContent() {
-  const logs = await getImportLogs();
-
-  return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold">Import</h1>
-        <p className="text-muted-foreground mt-1">
-          Fragen aus externen Quellen importieren
-        </p>
-      </div>
-
-      {/* Info Banner */}
-      <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3">
-        <Info className="w-5 h-5 text-primary mt-0.5" />
-        <div>
-          <p className="font-medium text-primary">Imports über Command Line</p>
-          <p className="text-sm text-muted-foreground mt-1">
-            Imports werden aktuell über Skripte ausgeführt. Web-Upload kommt in einer späteren Version.
-          </p>
-        </div>
-      </div>
-
-      {/* Import Options */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* JSON Migration */}
-        <div className="bg-card rounded-xl border border-border p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center">
-              <FileJson className="w-6 h-6 text-blue-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold">JSON Migration</h3>
-              <p className="text-sm text-muted-foreground">
-                Bestehende JSON-Fragen importieren
-              </p>
-            </div>
-          </div>
-          
-          <div className="bg-muted rounded-lg p-4 font-mono text-sm">
-            <code>npm run db:seed</code>
-          </div>
-          
-          <p className="text-sm text-muted-foreground mt-4">
-            Importiert alle Fragen aus <code className="text-primary">data/categories/*.json</code> in die Datenbank.
-          </p>
-        </div>
-
-        {/* OpenTDB Import */}
-        <div className="bg-card rounded-xl border border-border p-6">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="w-12 h-12 rounded-xl bg-purple-500/20 flex items-center justify-center">
-              <Database className="w-6 h-6 text-purple-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold">OpenTDB Import</h3>
-              <p className="text-sm text-muted-foreground">
-                Fragen von Open Trivia Database
-              </p>
-            </div>
-          </div>
-          
-          <div className="bg-muted rounded-lg p-4 font-mono text-sm space-y-2">
-            <div>
-              <span className="text-muted-foreground"># Beispiel:</span>
-            </div>
-            <code>npm run db:import-opentdb opentdb_video_games.json gaming</code>
-          </div>
-          
-          <p className="text-sm text-muted-foreground mt-4">
-            Importiert OpenTDB JSON-Exports. HTML-Entities werden automatisch dekodiert.
-          </p>
-        </div>
-      </div>
-
-      {/* OpenTDB API Info */}
-      <div className="bg-card rounded-xl border border-border p-6">
-        <h3 className="font-semibold mb-4">OpenTDB API nutzen</h3>
-        <div className="space-y-4 text-sm">
-          <p className="text-muted-foreground">
-            Du kannst Fragen direkt von der OpenTDB API herunterladen:
-          </p>
-          
-          <div className="bg-muted rounded-lg p-4 font-mono overflow-x-auto">
-            <div className="text-muted-foreground mb-2"># 50 Gaming-Fragen herunterladen:</div>
-            <code>
-              curl "https://opentdb.com/api.php?amount=50&category=15&type=multiple" | jq '.results' {'>'} opentdb_gaming.json
-            </code>
-          </div>
-          
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
-            <div className="bg-muted/50 rounded-lg p-3">
-              <div className="text-xs text-muted-foreground">Category 15</div>
-              <div className="font-medium">Video Games</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-3">
-              <div className="text-xs text-muted-foreground">Category 11</div>
-              <div className="font-medium">Film</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-3">
-              <div className="text-xs text-muted-foreground">Category 31</div>
-              <div className="font-medium">Anime & Manga</div>
-            </div>
-            <div className="bg-muted/50 rounded-lg p-3">
-              <div className="text-xs text-muted-foreground">Category 17</div>
-              <div className="font-medium">Science</div>
-            </div>
-          </div>
-          
-          <p className="text-muted-foreground">
-            Alle Kategorien findest du auf{' '}
-            <a 
-              href="https://opentdb.com/api_config.php" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              opentdb.com
-            </a>
-          </p>
-        </div>
-      </div>
-
-      {/* Import History */}
-      <div className="bg-card rounded-xl border border-border p-6">
-        <h3 className="font-semibold mb-4">Import-Verlauf</h3>
-        
-        {logs.length > 0 ? (
-          <div className="divide-y divide-border">
-            {logs.map((log) => (
-              <div
-                key={log.id}
-                className="py-4 first:pt-0 last:pb-0 flex items-center justify-between"
-              >
-                <div className="flex items-center gap-3">
-                  {log.questionsFailed === 0 ? (
-                    <CheckCircle2 className="w-5 h-5 text-green-500" />
-                  ) : (
-                    <AlertCircle className="w-5 h-5 text-yellow-500" />
-                  )}
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-medium">
-                        {log.source === 'json_migration' ? 'JSON Migration' : log.source}
-                      </span>
-                      {log.filename && (
-                        <Badge variant="secondary">{log.filename}</Badge>
-                      )}
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {new Date(log.createdAt).toLocaleDateString('de-DE', {
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="text-right">
-                  <div className="flex items-center gap-3">
-                    <span className="text-green-500">+{log.questionsAdded}</span>
-                    {log.questionsSkipped > 0 && (
-                      <span className="text-muted-foreground">
-                        {log.questionsSkipped} übersprungen
-                      </span>
-                    )}
-                    {log.questionsFailed > 0 && (
-                      <span className="text-red-500">
-                        {log.questionsFailed} fehlgeschlagen
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-8 text-muted-foreground">
-            <Clock className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p>Noch keine Imports durchgeführt</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+interface Category {
+  id: string;
+  slug: string;
+  name: string;
+  icon: string;
+  _count?: { questions: number };
 }
 
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-8 animate-pulse">
-      <div>
-        <div className="h-8 w-32 bg-muted rounded" />
-        <div className="h-4 w-64 bg-muted rounded mt-2" />
-      </div>
-      <div className="h-20 bg-muted rounded-xl" />
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="h-48 bg-card rounded-xl border border-border" />
-        <div className="h-48 bg-card rounded-xl border border-border" />
-      </div>
-    </div>
-  );
+interface ImportLog {
+  id: string;
+  source: string;
+  filename: string | null;
+  questionsAdded: number;
+  questionsSkipped: number;
+  questionsFailed: number;
+  createdAt: string;
 }
+
+const BATCH_SIZE_OPTIONS = [10, 25, 50, 100];
 
 export default function ImportPage() {
+  // File & Questions State
+  const [file, setFile] = useState<File | null>(null);
+  const [questions, setQuestions] = useState<OpenTDBQuestion[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Pagination & Selection
+  const [currentPage, setCurrentPage] = useState(0);
+  const [batchSize, setBatchSize] = useState(50);
+  const [selectedIndices, setSelectedIndices] = useState<Set<number>>(new Set());
+  
+  // Translation State
+  const [apiKey, setApiKey] = useState('');
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [translationProgress, setTranslationProgress] = useState<string | null>(null);
+  
+  // Import State
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<{
+    success: boolean;
+    message: string;
+    added?: number;
+    skipped?: number;
+    failed?: number;
+  } | null>(null);
+  
+  // Import Logs
+  const [logs, setLogs] = useState<ImportLog[]>([]);
+  const [logsLoading, setLogsLoading] = useState(true);
+  
+  // Duplicate Check State
+  const [isCheckingDuplicates, setIsCheckingDuplicates] = useState(false);
+  const [duplicateCount, setDuplicateCount] = useState(0);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load categories and logs on mount
+  useEffect(() => {
+    fetch('/api/admin/categories')
+      .then(res => res.json())
+      .then(data => setCategories(data))
+      .catch(console.error);
+    
+    // Load logs - we'll need to add an API endpoint or use SSR
+    setLogsLoading(false);
+    
+    // Load API key from localStorage
+    const savedKey = localStorage.getItem('openai_api_key');
+    if (savedKey) {
+      setApiKey(savedKey);
+    }
+  }, []);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(questions.length / batchSize);
+  const startIndex = currentPage * batchSize;
+  const endIndex = Math.min(startIndex + batchSize, questions.length);
+  const currentQuestions = questions.slice(startIndex, endIndex);
+
+  // File handling
+  const handleFileSelect = useCallback(async (selectedFile: File) => {
+    setFile(selectedFile);
+    setError(null);
+    setQuestions([]);
+    setSelectedIndices(new Set());
+    setCurrentPage(0);
+    setImportResult(null);
+
+    try {
+      const text = await selectedFile.text();
+      const data = JSON.parse(text);
+      
+      // Handle both array and {results: [...]} format
+      const questionsData = Array.isArray(data) ? data : data.results || [];
+      
+      if (!questionsData.length) {
+        setError('Keine Fragen in der Datei gefunden');
+        return;
+      }
+
+      // Validate structure
+      const isValid = questionsData.every((q: any) => 
+        q.question && q.correct_answer && Array.isArray(q.incorrect_answers)
+      );
+      
+      if (!isValid) {
+        setError('Ungültiges Dateiformat. Erwarte OpenTDB-Format mit question, correct_answer und incorrect_answers.');
+        return;
+      }
+
+      const loadedQuestions = questionsData.map((q: OpenTDBQuestion) => {
+        // Store original English text for duplicate detection
+        const originalQuestion = decodeHtmlEntities(q.question);
+        const originalCorrectAnswer = decodeHtmlEntities(q.correct_answer);
+        const originalIncorrectAnswers = q.incorrect_answers.map(decodeHtmlEntities);
+        
+        return {
+          ...q, 
+          _selected: true,
+          question: originalQuestion,
+          correct_answer: originalCorrectAnswer,
+          incorrect_answers: originalIncorrectAnswers,
+          // Store originals for later (will be used when importing after translation)
+          _originalQuestion: originalQuestion,
+          _originalCorrectAnswer: originalCorrectAnswer,
+          _originalIncorrectAnswers: originalIncorrectAnswers,
+        };
+      });
+      
+      setQuestions(loadedQuestions);
+      setSelectedIndices(new Set(questionsData.map((_: any, i: number) => i)));
+      
+      // Check for duplicates in the background
+      checkForDuplicates(loadedQuestions);
+    } catch (e) {
+      setError('Fehler beim Lesen der Datei: ' + (e instanceof Error ? e.message : 'Unbekannter Fehler'));
+    }
+  }, []);
+  
+  // Check for duplicates against the database
+  const checkForDuplicates = async (questionsToCheck: OpenTDBQuestion[]) => {
+    setIsCheckingDuplicates(true);
+    try {
+      const response = await fetch('/api/admin/check-duplicates', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questions: questionsToCheck }),
+      });
+      
+      const data = await response.json();
+      
+      if (data.duplicates && data.duplicates.length > 0) {
+        // Mark duplicates in questions array
+        setQuestions(prev => prev.map((q, idx) => {
+          const duplicateInfo = data.duplicateInfo?.find((d: { index: number }) => d.index === idx);
+          return {
+            ...q,
+            _duplicate: data.duplicates.includes(idx),
+            _duplicateCategory: duplicateInfo?.category,
+          };
+        }));
+        
+        // Remove duplicates from selection
+        setSelectedIndices(prev => {
+          const next = new Set(prev);
+          data.duplicates.forEach((idx: number) => next.delete(idx));
+          return next;
+        });
+        
+        setDuplicateCount(data.duplicateCount);
+      }
+    } catch (e) {
+      console.error('Failed to check duplicates:', e);
+    } finally {
+      setIsCheckingDuplicates(false);
+    }
+  };
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile?.type === 'application/json' || droppedFile?.name.endsWith('.json')) {
+      handleFileSelect(droppedFile);
+    } else {
+      setError('Bitte eine JSON-Datei auswählen');
+    }
+  }, [handleFileSelect]);
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      handleFileSelect(selectedFile);
+    }
+  };
+
+  // Selection handling
+  const toggleSelection = (globalIndex: number) => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev);
+      if (next.has(globalIndex)) {
+        next.delete(globalIndex);
+      } else {
+        next.add(globalIndex);
+      }
+      return next;
+    });
+  };
+
+  const selectAllOnPage = () => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev);
+      for (let i = startIndex; i < endIndex; i++) {
+        next.add(i);
+      }
+      return next;
+    });
+  };
+
+  const deselectAllOnPage = () => {
+    setSelectedIndices(prev => {
+      const next = new Set(prev);
+      for (let i = startIndex; i < endIndex; i++) {
+        next.delete(i);
+      }
+      return next;
+    });
+  };
+
+  const selectAll = () => {
+    setSelectedIndices(new Set(questions.map((_, i) => i)));
+  };
+
+  const deselectAll = () => {
+    setSelectedIndices(new Set());
+  };
+
+  // Translation
+  const handleTranslate = async () => {
+    if (!apiKey) {
+      setShowApiKeyInput(true);
+      return;
+    }
+
+    // Save API key
+    localStorage.setItem('openai_api_key', apiKey);
+
+    const selectedOnPage = currentQuestions
+      .map((_, i) => startIndex + i)
+      .filter(i => selectedIndices.has(i));
+
+    if (selectedOnPage.length === 0) {
+      setError('Keine Fragen auf dieser Seite ausgewählt');
+      return;
+    }
+
+    setIsTranslating(true);
+    setError(null);
+    setTranslationProgress(`Übersetze ${selectedOnPage.length} Fragen...`);
+
+    try {
+      const questionsToTranslate = selectedOnPage.map(i => questions[i]);
+      
+      const response = await fetch('/api/admin/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questions: questionsToTranslate,
+          apiKey,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Übersetzungsfehler');
+      }
+
+      // Update questions with translations
+      setQuestions(prev => {
+        const next = [...prev];
+        selectedOnPage.forEach((globalIndex, localIndex) => {
+          if (data.questions[localIndex]) {
+            next[globalIndex] = {
+              ...next[globalIndex],
+              ...data.questions[localIndex],
+            };
+          }
+        });
+        return next;
+      });
+
+      setTranslationProgress(`✓ ${selectedOnPage.length} Fragen übersetzt (${data.usage?.total_tokens || '?'} Tokens)`);
+      setTimeout(() => setTranslationProgress(null), 5000);
+    } catch (e) {
+      setError('Übersetzungsfehler: ' + (e instanceof Error ? e.message : 'Unbekannter Fehler'));
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
+  // Import
+  const handleImport = async () => {
+    if (!selectedCategory) {
+      setError('Bitte eine Zielkategorie auswählen');
+      return;
+    }
+
+    const selectedQuestionsList = Array.from(selectedIndices).map(i => questions[i]);
+    
+    if (selectedQuestionsList.length === 0) {
+      setError('Keine Fragen ausgewählt');
+      return;
+    }
+
+    setIsImporting(true);
+    setError(null);
+    setImportResult(null);
+
+    try {
+      const response = await fetch('/api/admin/import-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questions: selectedQuestionsList,
+          categoryId: selectedCategory,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Import-Fehler');
+      }
+
+      setImportResult({
+        success: true,
+        message: data.message,
+        added: data.added,
+        skipped: data.skipped,
+        failed: data.failed,
+      });
+
+      // Clear imported questions from selection
+      if (data.added > 0) {
+        setSelectedIndices(new Set());
+      }
+    } catch (e) {
+      setImportResult({
+        success: false,
+        message: e instanceof Error ? e.message : 'Import fehlgeschlagen',
+      });
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const selectedCount = selectedIndices.size;
+  const translatedCount = questions.filter(q => q._translated).length;
+  const selectedOnPageCount = currentQuestions.filter((_, i) => selectedIndices.has(startIndex + i)).length;
+  const duplicatesOnPageCount = currentQuestions.filter(q => q._duplicate).length;
+
   return (
-    <div className="p-8">
-      <Suspense fallback={<LoadingSkeleton />}>
-        <ImportContent />
-      </Suspense>
+    <div className="p-8 space-y-8">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Import</h1>
+          <p className="text-muted-foreground mt-1">
+            Fragen aus externen Quellen importieren & übersetzen
+          </p>
+        </div>
+        
+        {/* API Key Toggle */}
+        <button
+          onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-colors ${
+            apiKey ? 'border-green-500/50 bg-green-500/10 text-green-400' : 'border-border bg-card hover:bg-muted'
+          }`}
+        >
+          <Key className="w-4 h-4" />
+          {apiKey ? 'API Key gesetzt' : 'API Key eingeben'}
+        </button>
+      </div>
+
+      {/* API Key Input */}
+      {showApiKeyInput && (
+        <div className="bg-card border border-border rounded-xl p-4 flex items-center gap-4">
+          <Key className="w-5 h-5 text-muted-foreground" />
+          <input
+            type="password"
+            value={apiKey}
+            onChange={e => setApiKey(e.target.value)}
+            placeholder="OpenAI API Key (sk-...)"
+            className="flex-1 bg-muted rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-primary"
+          />
+          <button
+            onClick={() => {
+              localStorage.setItem('openai_api_key', apiKey);
+              setShowApiKeyInput(false);
+            }}
+            className="px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90"
+          >
+            Speichern
+          </button>
+        </div>
+      )}
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+          <div>
+            <p className="font-medium text-red-500">Fehler</p>
+            <p className="text-sm text-red-400">{error}</p>
+          </div>
+          <button onClick={() => setError(null)} className="ml-auto">
+            <X className="w-4 h-4 text-red-400 hover:text-red-300" />
+          </button>
+        </div>
+      )}
+
+      {/* Import Result */}
+      {importResult && (
+        <div className={`${importResult.success ? 'bg-green-500/10 border-green-500/30' : 'bg-red-500/10 border-red-500/30'} border rounded-xl p-4 flex items-start gap-3`}>
+          {importResult.success ? (
+            <CheckCircle2 className="w-5 h-5 text-green-500 mt-0.5 flex-shrink-0" />
+          ) : (
+            <AlertCircle className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" />
+          )}
+          <div>
+            <p className={`font-medium ${importResult.success ? 'text-green-500' : 'text-red-500'}`}>
+              {importResult.success ? 'Import erfolgreich' : 'Import fehlgeschlagen'}
+            </p>
+            <p className={`text-sm ${importResult.success ? 'text-green-400' : 'text-red-400'}`}>
+              {importResult.message}
+            </p>
+          </div>
+          <button onClick={() => setImportResult(null)} className="ml-auto">
+            <X className={`w-4 h-4 ${importResult.success ? 'text-green-400 hover:text-green-300' : 'text-red-400 hover:text-red-300'}`} />
+          </button>
+        </div>
+      )}
+
+      {/* File Upload Area */}
+      {!file && (
+        <div
+          onDrop={handleDrop}
+          onDragOver={e => e.preventDefault()}
+          onClick={() => fileInputRef.current?.click()}
+          className="border-2 border-dashed border-border rounded-xl p-12 text-center cursor-pointer hover:border-primary/50 hover:bg-primary/5 transition-colors"
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleFileInputChange}
+            className="hidden"
+          />
+          <Upload className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+          <h3 className="text-lg font-semibold mb-2">JSON-Datei auswählen</h3>
+          <p className="text-muted-foreground">
+            Ziehe eine OpenTDB-JSON-Datei hierher oder klicke zum Auswählen
+          </p>
+          <p className="text-sm text-muted-foreground mt-2">
+            Unterstützt: OpenTDB Export Format
+          </p>
+        </div>
+      )}
+
+      {/* Loaded File Info & Controls */}
+      {file && questions.length > 0 && (
+        <>
+          {/* File Info Bar */}
+          <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between flex-wrap gap-4">
+            <div className="flex items-center gap-3">
+              <FileJson className="w-8 h-8 text-primary" />
+              <div>
+                <p className="font-semibold">{file.name}</p>
+                <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                  <span>{questions.length} Fragen geladen</span>
+                  <span>•</span>
+                  <span className="text-primary">{selectedCount} ausgewählt</span>
+                  <span>•</span>
+                  <span className="text-purple-400">{translatedCount} übersetzt</span>
+                  {duplicateCount > 0 && (
+                    <>
+                      <span>•</span>
+                      <span className="text-yellow-500">{duplicateCount} bereits importiert</span>
+                    </>
+                  )}
+                  {isCheckingDuplicates && (
+                    <>
+                      <span>•</span>
+                      <span className="flex items-center gap-1">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        Prüfe Duplikate...
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={() => {
+                setFile(null);
+                setQuestions([]);
+                setSelectedIndices(new Set());
+                setImportResult(null);
+                setDuplicateCount(0);
+              }}
+              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              <X className="w-4 h-4" />
+              Datei schließen
+            </button>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="bg-card border border-border rounded-xl p-4 flex items-center justify-between flex-wrap gap-4">
+            {/* Left: Batch Size & Selection */}
+            <div className="flex items-center gap-4 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-muted-foreground">Pro Seite:</span>
+                <select
+                  value={batchSize}
+                  onChange={e => {
+                    setBatchSize(Number(e.target.value));
+                    setCurrentPage(0);
+                  }}
+                  className="bg-muted rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  {BATCH_SIZE_OPTIONS.map(size => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </div>
+              
+              <div className="h-6 w-px bg-border" />
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAllOnPage}
+                  className="text-sm text-primary hover:underline"
+                >
+                  Alle auf Seite auswählen
+                </button>
+                <span className="text-muted-foreground">|</span>
+                <button
+                  onClick={deselectAllOnPage}
+                  className="text-sm text-primary hover:underline"
+                >
+                  Abwählen
+                </button>
+              </div>
+              
+              <div className="h-6 w-px bg-border" />
+              
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={selectAll}
+                  className="text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Alle {questions.length}
+                </button>
+                <span className="text-muted-foreground">|</span>
+                <button
+                  onClick={deselectAll}
+                  className="text-sm text-muted-foreground hover:text-foreground"
+                >
+                  Keine
+                </button>
+              </div>
+            </div>
+
+            {/* Right: Actions */}
+            <div className="flex items-center gap-3">
+              {/* Translate Button */}
+              <button
+                onClick={handleTranslate}
+                disabled={isTranslating || selectedOnPageCount === 0}
+                className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isTranslating ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Languages className="w-4 h-4" />
+                )}
+                Seite übersetzen ({selectedOnPageCount})
+              </button>
+            </div>
+          </div>
+
+          {/* Translation Progress */}
+          {translationProgress && (
+            <div className="bg-purple-500/10 border border-purple-500/30 rounded-xl p-4 flex items-center gap-3">
+              {isTranslating ? (
+                <Loader2 className="w-5 h-5 text-purple-400 animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-5 h-5 text-purple-400" />
+              )}
+              <span className="text-purple-300">{translationProgress}</span>
+            </div>
+          )}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              Zeige {startIndex + 1}–{endIndex} von {questions.length} Fragen
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+                disabled={currentPage === 0}
+                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+              <span className="px-4 py-2 bg-muted rounded-lg text-sm">
+                Seite {currentPage + 1} / {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+                disabled={currentPage >= totalPages - 1}
+                className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Duplicate Info Banner */}
+          {duplicatesOnPageCount > 0 && (
+            <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-yellow-500 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium text-yellow-500">
+                  {duplicatesOnPageCount} Frage{duplicatesOnPageCount !== 1 ? 'n' : ''} auf dieser Seite bereits importiert
+                </p>
+                <p className="text-sm text-yellow-400/80">
+                  Diese Fragen wurden automatisch abgewählt und sind ausgegraut dargestellt.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Questions List */}
+          <div className="space-y-3">
+            {currentQuestions.map((q, localIndex) => {
+              const globalIndex = startIndex + localIndex;
+              const isSelected = selectedIndices.has(globalIndex);
+              const isDuplicate = q._duplicate;
+              
+              return (
+                <div
+                  key={globalIndex}
+                  onClick={() => !isDuplicate && toggleSelection(globalIndex)}
+                  className={`bg-card border rounded-xl p-4 transition-all ${
+                    isDuplicate 
+                      ? 'border-yellow-500/30 opacity-50 cursor-not-allowed'
+                      : isSelected 
+                        ? 'border-primary ring-1 ring-primary/30 cursor-pointer' 
+                        : 'border-border hover:border-muted-foreground/30 cursor-pointer'
+                  }`}
+                >
+                  <div className="flex items-start gap-4">
+                    {/* Checkbox */}
+                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 mt-0.5 ${
+                      isDuplicate 
+                        ? 'bg-yellow-500/20 border-yellow-500/50'
+                        : isSelected 
+                          ? 'bg-primary border-primary' 
+                          : 'border-muted-foreground/50'
+                    }`}>
+                      {isDuplicate ? (
+                        <Database className="w-3 h-3 text-yellow-500" />
+                      ) : isSelected ? (
+                        <Check className="w-3 h-3 text-primary-foreground" />
+                      ) : null}
+                    </div>
+                    
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
+                        <span className="text-xs text-muted-foreground">#{globalIndex + 1}</span>
+                        {isDuplicate && (
+                          <Badge className="text-xs bg-yellow-500/20 text-yellow-500 border-yellow-500/30">
+                            <Database className="w-3 h-3 mr-1" />
+                            Bereits in {q._duplicateCategory || 'DB'}
+                          </Badge>
+                        )}
+                        <Badge variant="secondary" className="text-xs">
+                          {q.type === 'boolean' ? 'Wahr/Falsch' : 'Multiple Choice'}
+                        </Badge>
+                        <Badge 
+                          variant="secondary" 
+                          className={`text-xs ${
+                            q.difficulty === 'easy' ? 'bg-green-500/20 text-green-400' :
+                            q.difficulty === 'hard' ? 'bg-red-500/20 text-red-400' :
+                            'bg-yellow-500/20 text-yellow-400'
+                          }`}
+                        >
+                          {q.difficulty === 'easy' ? 'Leicht' : q.difficulty === 'hard' ? 'Schwer' : 'Mittel'}
+                        </Badge>
+                        {q._translated && (
+                          <Badge className="text-xs bg-purple-500/20 text-purple-400 border-purple-500/30">
+                            <Languages className="w-3 h-3 mr-1" />
+                            Übersetzt
+                          </Badge>
+                        )}
+                      </div>
+                      
+                      <p className="font-medium mb-3">{q.question}</p>
+                      
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div className="flex items-center gap-2 p-2 bg-green-500/10 border border-green-500/30 rounded-lg">
+                          <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
+                          <span className="text-green-400 truncate">{q.correct_answer}</span>
+                        </div>
+                        {q.incorrect_answers.map((answer, i) => (
+                          <div key={i} className="flex items-center gap-2 p-2 bg-muted rounded-lg">
+                            <X className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                            <span className="text-muted-foreground truncate">{answer}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Bottom Pagination */}
+          <div className="flex items-center justify-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(0, p - 1))}
+              disabled={currentPage === 0}
+              className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+            <span className="px-4 py-2 bg-muted rounded-lg text-sm">
+              Seite {currentPage + 1} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages - 1, p + 1))}
+              disabled={currentPage >= totalPages - 1}
+              className="p-2 rounded-lg border border-border hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Import Section */}
+          <div className="bg-card border border-border rounded-xl p-6">
+            <h3 className="font-semibold text-lg mb-4 flex items-center gap-2">
+              <Database className="w-5 h-5 text-primary" />
+              In Datenbank importieren
+            </h3>
+            
+            <div className="flex items-end gap-4 flex-wrap">
+              <div className="flex-1 min-w-[200px]">
+                <label className="block text-sm text-muted-foreground mb-2">
+                  Zielkategorie
+                </label>
+                <select
+                  value={selectedCategory}
+                  onChange={e => setSelectedCategory(e.target.value)}
+                  className="w-full bg-muted rounded-lg px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">Kategorie auswählen...</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.icon} {cat.name} ({cat._count?.questions || 0} Fragen)
+                    </option>
+                  ))}
+                </select>
+              </div>
+              
+              <button
+                onClick={handleImport}
+                disabled={isImporting || !selectedCategory || selectedCount === 0}
+                className="flex items-center gap-2 px-6 py-2.5 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {isImporting ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Import className="w-4 h-4" />
+                )}
+                {selectedCount} Fragen importieren
+              </button>
+            </div>
+            
+            <p className="text-sm text-muted-foreground mt-4">
+              Importierte Fragen werden als "nicht verifiziert" markiert und können im Fragen-Manager überprüft werden.
+            </p>
+          </div>
+        </>
+      )}
+
+      {/* Info Section when no file loaded */}
+      {!file && (
+        <>
+          <div className="bg-primary/10 border border-primary/30 rounded-xl p-4 flex items-start gap-3">
+            <Info className="w-5 h-5 text-primary mt-0.5" />
+            <div>
+              <p className="font-medium text-primary">OpenTDB Import mit Übersetzung</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Lade eine JSON-Datei von OpenTDB hoch, übersetze sie segmentweise ins Deutsche und importiere sie in die Datenbank.
+              </p>
+            </div>
+          </div>
+
+          {/* OpenTDB API Info */}
+          <div className="bg-card rounded-xl border border-border p-6">
+            <h3 className="font-semibold mb-4">OpenTDB API nutzen</h3>
+            <div className="space-y-4 text-sm">
+              <p className="text-muted-foreground">
+                Du kannst Fragen direkt von der OpenTDB API herunterladen:
+              </p>
+              
+              <div className="bg-muted rounded-lg p-4 font-mono overflow-x-auto">
+                <div className="text-muted-foreground mb-2"># 50 Gaming-Fragen herunterladen:</div>
+                <code>
+                  curl &quot;https://opentdb.com/api.php?amount=50&category=15&type=multiple&quot; | jq &apos;.results&apos; {'>'} opentdb_gaming.json
+                </code>
+              </div>
+              
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                <div className="bg-muted/50 rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground">Category 15</div>
+                  <div className="font-medium">Video Games</div>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground">Category 11</div>
+                  <div className="font-medium">Film</div>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground">Category 31</div>
+                  <div className="font-medium">Anime & Manga</div>
+                </div>
+                <div className="bg-muted/50 rounded-lg p-3">
+                  <div className="text-xs text-muted-foreground">Category 17</div>
+                  <div className="font-medium">Science</div>
+                </div>
+              </div>
+              
+              <p className="text-muted-foreground">
+                Alle Kategorien findest du auf{' '}
+                <a 
+                  href="https://opentdb.com/api_config.php" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-primary hover:underline"
+                >
+                  opentdb.com
+                </a>
+              </p>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
+// Decode HTML entities from OpenTDB
+function decodeHtmlEntities(text: string): string {
+  const entities: Record<string, string> = {
+    '&quot;': '"',
+    '&#039;': "'",
+    '&apos;': "'",
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&nbsp;': ' ',
+    '&ldquo;': '"',
+    '&rdquo;': '"',
+    '&lsquo;': "'",
+    '&rsquo;': "'",
+    '&mdash;': '—',
+    '&ndash;': '–',
+    '&hellip;': '…',
+    '&eacute;': 'é',
+    '&Eacute;': 'É',
+    '&uuml;': 'ü',
+    '&Uuml;': 'Ü',
+    '&ouml;': 'ö',
+    '&Ouml;': 'Ö',
+    '&auml;': 'ä',
+    '&Auml;': 'Ä',
+    '&szlig;': 'ß',
+  };
 
-
+  let result = text;
+  for (const [entity, char] of Object.entries(entities)) {
+    result = result.replace(new RegExp(entity, 'g'), char);
+  }
+  
+  // Handle numeric entities
+  result = result.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(parseInt(code, 10)));
+  result = result.replace(/&#x([0-9a-fA-F]+);/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+  
+  return result;
+}

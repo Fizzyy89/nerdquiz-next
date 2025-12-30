@@ -25,6 +25,7 @@ interface GameRoom {
     phase: string;
     diceRoyale: any;
     rpsDuel: any;
+    bonusRound: any;
     loserPickPlayerId: string | null;
     votingCategories: any[];
     currentQuestion: any;
@@ -131,7 +132,79 @@ class BotManager {
       case 'estimation':
         this.handleEstimationPhase(botsInRoom, room);
         break;
+      case 'bonus_round':
+        // Bonus round turn handling is triggered separately
+        break;
     }
+  }
+
+  /**
+   * Handle bonus round turn - bot submits answer when it's their turn
+   * Called externally when a bot's turn starts
+   */
+  onBonusRoundTurn(roomCode: string, playerId: string) {
+    const bot = this.bots.get(playerId);
+    if (!bot) return; // Not a bot
+
+    const room = this.getRoomFn?.(roomCode);
+    if (!room || room.state.phase !== 'bonus_round') return;
+
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound || bonusRound.phase !== 'playing') return;
+
+    // Find items that haven't been guessed yet
+    const unguessedItems = bonusRound.items.filter((item: any) => !item.guessedBy);
+    if (unguessedItems.length === 0) return;
+
+    // Bot decides: 80% chance to try an answer, 20% chance to skip (get eliminated)
+    const shouldTry = Math.random() < 0.8;
+    
+    if (!shouldTry) {
+      // Bot decides to skip
+      const delay = this.randomDelay(2000, 6000);
+      const timerId = `${bot.id}-bonus-skip`;
+      
+      const timer = setTimeout(() => {
+        console.log(`🤖 ${bot.name} gives up (bonus round)`);
+        
+        this.triggerAction('bonus_round_skip', {
+          roomCode: bot.roomCode,
+          playerId: bot.id,
+        });
+        
+        this.activeTimers.delete(timerId);
+      }, delay);
+      
+      this.activeTimers.set(timerId, timer);
+      return;
+    }
+
+    // Pick a random unguessed item and submit an alias
+    const delay = this.randomDelay(1500, 8000);
+    const timerId = `${bot.id}-bonus-answer`;
+    
+    const timer = setTimeout(() => {
+      // Re-check unguessed items (they may have changed)
+      const currentUnguessed = bonusRound.items.filter((item: any) => !item.guessedBy);
+      if (currentUnguessed.length === 0) return;
+      
+      const randomItem = currentUnguessed[Math.floor(Math.random() * currentUnguessed.length)];
+      // Pick a random alias for more realistic variety
+      const aliases = randomItem.aliases || [randomItem.display];
+      const answer = aliases[Math.floor(Math.random() * aliases.length)];
+      
+      console.log(`🤖 ${bot.name} answers: "${answer}" (bonus round)`);
+      
+      this.triggerAction('bonus_round_submit', {
+        roomCode: bot.roomCode,
+        playerId: bot.id,
+        answer: answer,
+      });
+      
+      this.activeTimers.delete(timerId);
+    }, delay);
+    
+    this.activeTimers.set(timerId, timer);
   }
 
   /**

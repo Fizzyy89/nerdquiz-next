@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
   LobbyScreen,
-  CategoryAnnouncementScreen,
+  RoundAnnouncementScreen,
   VotingScreen,
   CategoryWheelScreen,
   LosersPickScreen,
@@ -22,6 +22,7 @@ import {
   EstimationRevealScreen,
   ScoreboardScreen,
   FinalScreen,
+  BonusRoundScreen,
 } from '@/components/screens';
 import { Loader2, ArrowRight, ArrowLeft, Users, AlertCircle } from 'lucide-react';
 
@@ -110,8 +111,10 @@ export default function RoomPage() {
     switch (room.phase) {
       case 'lobby':
         return <LobbyScreen key="lobby" />;
+      case 'round_announcement':
       case 'category_announcement':
-        return <CategoryAnnouncementScreen key="category-announcement" />;
+      case 'bonus_round_announcement':
+        return <RoundAnnouncementScreen key="round-announcement" />;
       case 'category_voting':
         return <VotingScreen key="voting" />;
       case 'category_wheel':
@@ -132,6 +135,9 @@ export default function RoomPage() {
         return <EstimationRevealScreen key="estimation-reveal" />;
       case 'scoreboard':
         return <ScoreboardScreen key="scoreboard" />;
+      case 'bonus_round':
+      case 'bonus_round_result':
+        return <BonusRoundScreen key="bonus-round" />;
       case 'final':
         return <FinalScreen key="final" />;
       default:

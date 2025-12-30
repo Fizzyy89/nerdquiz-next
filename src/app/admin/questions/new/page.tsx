@@ -22,7 +22,7 @@ interface Category {
   icon: string;
 }
 
-type QuestionType = 'MULTIPLE_CHOICE' | 'ESTIMATION' | 'TRUE_FALSE' | 'SORTING' | 'TEXT_INPUT' | 'MATCHING';
+type QuestionType = 'MULTIPLE_CHOICE' | 'ESTIMATION' | 'TRUE_FALSE' | 'SORTING' | 'TEXT_INPUT' | 'MATCHING' | 'COLLECTIVE_LIST';
 type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 
 export default function NewQuestionPage() {
@@ -47,6 +47,29 @@ export default function NewQuestionPage() {
   
   // True/False state
   const [trueFalseAnswer, setTrueFalseAnswer] = useState(true);
+  
+  // Collective List state
+  const [collectiveTopic, setCollectiveTopic] = useState('');
+  const [collectiveDescription, setCollectiveDescription] = useState('');
+  const [collectiveItemsText, setCollectiveItemsText] = useState('');
+  const [collectiveTimePerTurn, setCollectiveTimePerTurn] = useState(15);
+
+  // Parse items text to structured format
+  const parseCollectiveItems = (text: string) => {
+    return text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(line => line.length > 0)
+      .map((line, idx) => {
+        const parts = line.split(',').map(p => p.trim()).filter(p => p.length > 0);
+        const display = parts[0] || '';
+        return {
+          id: `item-${idx}`,
+          display,
+          aliases: parts, // All parts including display as aliases
+        };
+      });
+  };
 
   // Load categories
   useEffect(() => {
@@ -82,14 +105,26 @@ export default function NewQuestionPage() {
         content = {
           correctAnswer: trueFalseAnswer,
         };
+      } else if (type === 'COLLECTIVE_LIST') {
+        const parsedItems = parseCollectiveItems(collectiveItemsText);
+        content = {
+          topic: collectiveTopic,
+          description: collectiveDescription || undefined,
+          items: parsedItems,
+          timePerTurn: collectiveTimePerTurn,
+          fuzzyThreshold: 0.85,
+        };
       }
+
+      // For COLLECTIVE_LIST, use the topic as the question text
+      const questionText = type === 'COLLECTIVE_LIST' ? collectiveTopic : text;
 
       const response = await fetch('/api/admin/questions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           categoryId,
-          text,
+          text: questionText,
           type,
           difficulty,
           content,
@@ -184,23 +219,26 @@ export default function NewQuestionPage() {
                 <option value="MULTIPLE_CHOICE">Multiple Choice</option>
                 <option value="ESTIMATION">Schätzfrage</option>
                 <option value="TRUE_FALSE">Wahr/Falsch</option>
+                <option value="COLLECTIVE_LIST">📋 Sammel-Liste</option>
               </select>
             </div>
           </div>
 
-          {/* Question Text */}
-          <div>
-            <label className="text-sm font-medium mb-2 block">
-              Fragetext *
-            </label>
-            <textarea
-              value={text}
-              onChange={(e) => setText(e.target.value)}
-              className="w-full bg-muted border border-border rounded-lg px-3 py-2 min-h-[100px] resize-y"
-              placeholder="Wie lautet die Frage?"
-              required
-            />
-          </div>
+          {/* Question Text - hidden for COLLECTIVE_LIST */}
+          {type !== 'COLLECTIVE_LIST' && (
+            <div>
+              <label className="text-sm font-medium mb-2 block">
+                Fragetext *
+              </label>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                className="w-full bg-muted border border-border rounded-lg px-3 py-2 min-h-[100px] resize-y"
+                placeholder="Wie lautet die Frage?"
+                required
+              />
+            </div>
+          )}
 
           {/* Difficulty */}
           <div>
@@ -239,6 +277,7 @@ export default function NewQuestionPage() {
             {type === 'MULTIPLE_CHOICE' && 'Antworten'}
             {type === 'ESTIMATION' && 'Schätzwert'}
             {type === 'TRUE_FALSE' && 'Richtige Antwort'}
+            {type === 'COLLECTIVE_LIST' && 'Listen-Konfiguration'}
           </h2>
 
           {/* Multiple Choice */}
@@ -358,6 +397,70 @@ export default function NewQuestionPage() {
               >
                 ✗ Falsch
               </button>
+            </div>
+          )}
+
+          {/* Collective List / Sammel-Liste */}
+          {type === 'COLLECTIVE_LIST' && (
+            <div className="space-y-6">
+              {/* Topic & Description */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Thema *
+                  </label>
+                  <Input
+                    value={collectiveTopic}
+                    onChange={(e) => setCollectiveTopic(e.target.value)}
+                    placeholder="z.B. US-Bundesstaaten"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium mb-2 block">
+                    Zeit pro Zug (Sekunden)
+                  </label>
+                  <Input
+                    type="number"
+                    min={5}
+                    max={60}
+                    value={collectiveTimePerTurn}
+                    onChange={(e) => setCollectiveTimePerTurn(parseInt(e.target.value) || 15)}
+                  />
+                </div>
+              </div>
+              
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  Beschreibung (optional)
+                </label>
+                <Input
+                  value={collectiveDescription}
+                  onChange={(e) => setCollectiveDescription(e.target.value)}
+                  placeholder="z.B. Nenne alle 50 Bundesstaaten der USA"
+                />
+              </div>
+
+              {/* Items List - Textarea */}
+              <div>
+                <label className="text-sm font-medium mb-2 block">
+                  Begriffe ({parseCollectiveItems(collectiveItemsText).length} Einträge)
+                </label>
+                <p className="text-xs text-muted-foreground mb-3">
+                  Pro Zeile ein Begriff. Aliasse (alternative Schreibweisen) mit Kommas trennen.<br />
+                  <span className="text-primary">Beispiel:</span> California, Kalifornien, Cali
+                </p>
+                
+                <textarea
+                  value={collectiveItemsText}
+                  onChange={(e) => setCollectiveItemsText(e.target.value)}
+                  className="w-full bg-muted border border-border rounded-lg px-3 py-2 min-h-[300px] resize-y font-mono text-sm"
+                  placeholder={`California, Kalifornien
+New York, Newyork
+Texas
+Delaware`}
+                />
+              </div>
             </div>
           )}
         </div>

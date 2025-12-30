@@ -1,0 +1,172 @@
+/**
+ * Fuzzy-Matching Utilities für Bonusrunden
+ * 
+ * Ermöglicht tolerante Eingabeerkennung bei Tippfehlern
+ */
+
+import { distance } from 'fastest-levenshtein';
+
+/**
+ * Normalisiert einen String für den Vergleich:
+ * - Kleinschreibung
+ * - Trimmen
+ * - Umlaute vereinheitlichen
+ * - Sonderzeichen entfernen
+ */
+export function normalizeString(str: string): string {
+  return str
+    .toLowerCase()
+    .trim()
+    // Deutsche Umlaute normalisieren
+    .replace(/ä/g, 'ae')
+    .replace(/ö/g, 'oe')
+    .replace(/ü/g, 'ue')
+    .replace(/ß/g, 'ss')
+    // Unicode-Normalisierung (Akzente entfernen)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    // Nur alphanumerische Zeichen und Leerzeichen
+    .replace(/[^a-z0-9\s]/g, '')
+    // Mehrfache Leerzeichen zusammenfassen
+    .replace(/\s+/g, ' ');
+}
+
+/**
+ * Berechnet die Ähnlichkeit zwischen zwei Strings (0-1)
+ * Basiert auf Levenshtein-Distanz
+ */
+export function similarity(str1: string, str2: string): number {
+  const norm1 = normalizeString(str1);
+  const norm2 = normalizeString(str2);
+  
+  if (norm1 === norm2) return 1;
+  if (norm1.length === 0 || norm2.length === 0) return 0;
+  
+  const maxLen = Math.max(norm1.length, norm2.length);
+  const dist = distance(norm1, norm2);
+  
+  return 1 - (dist / maxLen);
+}
+
+/**
+ * Ergebnis eines Match-Versuchs
+ */
+export interface MatchResult {
+  isMatch: boolean;
+  matchedItemId: string | null;
+  matchedDisplay: string | null;
+  confidence: number;
+  matchType: 'exact' | 'alias' | 'fuzzy' | 'none';
+  alreadyGuessed: boolean;
+}
+
+/**
+ * Item-Definition für Collective List
+ */
+export interface CollectiveListItem {
+  id: string;
+  display: string;
+  aliases: string[];
+  group?: string;
+}
+
+/**
+ * Prüft ob eine Eingabe zu einem Item passt
+ * Berücksichtigt:
+ * 1. Exakte Übereinstimmung mit Display-Name
+ * 2. Exakte Übereinstimmung mit Aliases
+ * 3. Fuzzy-Match mit Threshold
+ */
+export function checkAnswer(
+  input: string,
+  items: CollectiveListItem[],
+  alreadyGuessed: Set<string>,
+  fuzzyThreshold: number = 0.85
+): MatchResult {
+  const normalizedInput = normalizeString(input);
+  
+  if (!normalizedInput) {
+    return {
+      isMatch: false,
+      matchedItemId: null,
+      matchedDisplay: null,
+      confidence: 0,
+      matchType: 'none',
+      alreadyGuessed: false,
+    };
+  }
+
+  // Zuerst exakte Matches prüfen
+  for (const item of items) {
+    // Prüfe Display-Name
+    if (normalizeString(item.display) === normalizedInput) {
+      return {
+        isMatch: !alreadyGuessed.has(item.id),
+        matchedItemId: item.id,
+        matchedDisplay: item.display,
+        confidence: 1,
+        matchType: 'exact',
+        alreadyGuessed: alreadyGuessed.has(item.id),
+      };
+    }
+    
+    // Prüfe alle Aliases
+    for (const alias of item.aliases) {
+      if (normalizeString(alias) === normalizedInput) {
+        return {
+          isMatch: !alreadyGuessed.has(item.id),
+          matchedItemId: item.id,
+          matchedDisplay: item.display,
+          confidence: 1,
+          matchType: 'alias',
+          alreadyGuessed: alreadyGuessed.has(item.id),
+        };
+      }
+    }
+  }
+
+  // Dann Fuzzy-Matches prüfen
+  let bestMatch: { item: CollectiveListItem; confidence: number } | null = null;
+
+  for (const item of items) {
+    // Prüfe Display-Name mit Fuzzy
+    const displaySimilarity = similarity(input, item.display);
+    if (displaySimilarity >= fuzzyThreshold) {
+      if (!bestMatch || displaySimilarity > bestMatch.confidence) {
+        bestMatch = { item, confidence: displaySimilarity };
+      }
+    }
+    
+    // Prüfe alle Aliases mit Fuzzy
+    for (const alias of item.aliases) {
+      const aliasSimilarity = similarity(input, alias);
+      if (aliasSimilarity >= fuzzyThreshold) {
+        if (!bestMatch || aliasSimilarity > bestMatch.confidence) {
+          bestMatch = { item, confidence: aliasSimilarity };
+        }
+      }
+    }
+  }
+
+  if (bestMatch) {
+    return {
+      isMatch: !alreadyGuessed.has(bestMatch.item.id),
+      matchedItemId: bestMatch.item.id,
+      matchedDisplay: bestMatch.item.display,
+      confidence: bestMatch.confidence,
+      matchType: 'fuzzy',
+      alreadyGuessed: alreadyGuessed.has(bestMatch.item.id),
+    };
+  }
+
+  // Kein Match gefunden
+  return {
+    isMatch: false,
+    matchedItemId: null,
+    matchedDisplay: null,
+    confidence: 0,
+    matchType: 'none',
+    alreadyGuessed: false,
+  };
+}
+

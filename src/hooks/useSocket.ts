@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useCallback } from 'react';
-import { useGameStore } from '@/store/gameStore';
+import { useGameStore, type BonusRoundEndResult } from '@/store/gameStore';
 import type { RoomState, AnswerResult, FinalRanking } from '@/types/game';
 import { getSocket } from '@/lib/socket';
 import { saveSession, clearSession } from '@/lib/session';
@@ -13,6 +13,7 @@ export function useSocket() {
     setRoom,
     setLastResults,
     setFinalRankings,
+    setBonusRoundResult,
     resetQuestion,
     reset,
   } = useGameStore();
@@ -72,6 +73,11 @@ export function useSocket() {
       console.log(`✅ ${playerName} answered`);
     };
 
+    const handleBonusRoundEnd = (data: BonusRoundEndResult) => {
+      console.log('🎯 Bonus round ended:', data);
+      setBonusRoundResult(data);
+    };
+
     socket.on('connect', handleConnect);
     socket.on('disconnect', handleDisconnect);
     socket.on('room_update', handleRoomUpdate);
@@ -83,6 +89,7 @@ export function useSocket() {
     socket.on('player_joined', handlePlayerJoined);
     socket.on('player_disconnected', handlePlayerDisconnected);
     socket.on('player_answered', handlePlayerAnswered);
+    socket.on('bonus_round_end', handleBonusRoundEnd);
 
     // Connect if not already connected
     if (!socket.connected) {
@@ -103,8 +110,9 @@ export function useSocket() {
       socket.off('player_joined', handlePlayerJoined);
       socket.off('player_disconnected', handlePlayerDisconnected);
       socket.off('player_answered', handlePlayerAnswered);
+      socket.off('bonus_round_end', handleBonusRoundEnd);
     };
-  }, [setConnected, setRoom, setLastResults, setFinalRankings, resetQuestion]);
+  }, [setConnected, setRoom, setLastResults, setFinalRankings, setBonusRoundResult, resetQuestion]);
 
   // === API Methods ===
   // All methods automatically get roomCode and playerId from store
@@ -233,6 +241,20 @@ export function useSocket() {
     socket.emit('reroll_avatar', { roomCode, playerId });
   }, []);
 
+  const submitBonusRoundAnswer = useCallback((answer: string) => {
+    const socket = getSocket();
+    const { playerId, roomCode } = useGameStore.getState();
+    if (!roomCode || !playerId) return;
+    socket.emit('bonus_round_submit', { roomCode, playerId, answer });
+  }, []);
+
+  const skipBonusRound = useCallback(() => {
+    const socket = getSocket();
+    const { playerId, roomCode } = useGameStore.getState();
+    if (!roomCode || !playerId) return;
+    socket.emit('bonus_round_skip', { roomCode, playerId });
+  }, []);
+
   return {
     createRoom,
     joinRoom,
@@ -246,5 +268,7 @@ export function useSocket() {
     next,
     leaveGame,
     rerollAvatar,
+    submitBonusRoundAnswer,
+    skipBonusRound,
   };
 }

@@ -12,6 +12,13 @@ import path from 'path';
 import 'dotenv/config';
 import { botManager } from './src/server/botManager';
 import * as questionLoader from './src/server/questionLoader';
+import { checkAnswer as fuzzyCheckAnswer, normalizeString } from './src/lib/fuzzyMatch';
+import { 
+  selectRandomCategoryMode, 
+  CATEGORY_MODE_DATA_MAP,
+  type CategorySelectionModeData,
+  type CategorySelectionMode,
+} from './src/config/gameModes.shared';
 
 const dev = process.env.NODE_ENV !== 'production';
 const hostname = dev ? 'localhost' : '0.0.0.0';
@@ -73,7 +80,7 @@ interface GameQuestion {
   explanation?: string;
 }
 
-type CategorySelectionMode = 'voting' | 'wheel' | 'losers_pick' | 'dice_royale' | 'rps_duel';
+// CategorySelectionMode is imported from ./src/config/gameModes.shared
 
 // Dice Royale - All players roll, highest wins
 interface DiceRoyaleState {
@@ -99,6 +106,53 @@ interface RPSDuelState {
   phase: 'selecting' | 'choosing' | 'revealing' | 'result';
 }
 
+// Bonus Round - Collective List
+interface BonusRoundItem {
+  id: string;
+  display: string;
+  aliases: string[];
+  group?: string;
+  guessedBy?: string;
+  guessedByName?: string;
+  guessedAt?: number;
+}
+
+interface ServerBonusRoundState {
+  phase: 'intro' | 'playing' | 'finished';
+  topic: string;
+  description?: string;
+  category?: string;
+  categoryIcon?: string;
+  questionType?: string;
+  items: BonusRoundItem[];
+  guessedIds: Set<string>;
+  currentTurnIndex: number;
+  currentTurnTimer: NodeJS.Timeout | null;
+  turnOrder: string[];
+  activePlayers: string[];
+  eliminatedPlayers: Array<{
+    playerId: string;
+    playerName: string;
+    avatarSeed: string;
+    eliminationReason: 'wrong' | 'timeout' | 'skip';
+    rank: number;
+  }>;
+  lastGuess?: {
+    playerId: string;
+    playerName: string;
+    input: string;
+    result: 'correct' | 'wrong' | 'already_guessed' | 'timeout' | 'skip';
+    matchedDisplay?: string;
+    confidence?: number;
+  };
+  pointsPerCorrect: number;
+  timePerTurn: number;
+  fuzzyThreshold: number;
+  turnNumber: number;
+  /** Tracks how many correct answers each player got */
+  playerCorrectCounts: Map<string, number>;
+}
+
 interface GameRoom {
   code: string;
   hostId: string;
@@ -107,9 +161,15 @@ interface GameRoom {
     maxRounds: number;
     questionsPerRound: number;
     timePerQuestion: number;
+    // Bonusrunden-Einstellungen
+    bonusRoundChance: number; // 0-100, Wahrscheinlichkeit dass eine Runde zur Bonusrunde wird
+    finalRoundAlwaysBonus: boolean; // Letzte Runde immer als Bonusrunde
+    // Zukünftige Erweiterungen
+    enableEstimation: boolean; // Schätzfragen aktiviert
+    enableMediaQuestions: boolean; // Bild/Audio/Video Fragen
   };
   state: {
-    phase: 'lobby' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_royale' | 'category_rps_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'final';
+    phase: 'lobby' | 'round_announcement' | 'category_announcement' | 'category_voting' | 'category_wheel' | 'category_losers_pick' | 'category_dice_royale' | 'category_rps_duel' | 'question' | 'estimation' | 'revealing' | 'estimation_reveal' | 'scoreboard' | 'bonus_round_announcement' | 'bonus_round' | 'bonus_round_result' | 'final';
     currentRound: number;
     currentQuestionIndex: number;
     currentQuestion: GameQuestion | null;
@@ -124,7 +184,11 @@ interface GameRoom {
     lastLoserPickRound: number; // Cooldown tracking
     diceRoyale: DiceRoyaleState | null;
     rpsDuel: RPSDuelState | null;
+    bonusRound: ServerBonusRoundState | null;
     wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
+    // Duplikat-Vermeidung: bereits verwendete Fragen-IDs
+    usedQuestionIds: Set<string>;
+    usedBonusQuestionIds: Set<string>;
   };
   createdAt: Date;
 }
@@ -138,8 +202,21 @@ async function getRandomCategoriesForVoting(count: number = 8): Promise<Category
   return questionLoader.getRandomCategoriesForVoting(count);
 }
 
-async function getRandomQuestions(categoryId: string, count: number): Promise<GameQuestion[]> {
-  return questionLoader.getRandomQuestions(categoryId, count);
+async function getRandomQuestions(categoryId: string, count: number, excludeIds: string[] = []): Promise<GameQuestion[]> {
+  return questionLoader.getRandomQuestions(categoryId, count, excludeIds);
+}
+
+// Helper: Get questions for a room with duplicate prevention
+async function getQuestionsForRoom(room: GameRoom, categoryId: string, count: number): Promise<GameQuestion[]> {
+  const excludeIds = Array.from(room.state.usedQuestionIds);
+  const questions = await getRandomQuestions(categoryId, count, excludeIds);
+  
+  // Track used questions
+  for (const q of questions) {
+    room.state.usedQuestionIds.add(q.id);
+  }
+  
+  return questions;
 }
 
 async function getCategoryData(categoryId: string): Promise<{ name: string; icon: string } | null> {
@@ -222,6 +299,44 @@ function roomToClient(room: GameRoom) {
     round: room.state.diceRoyale.round,
   } : null;
 
+  // Convert BonusRound state for client (Set -> Array, hide aliases)
+  const bonusRoundClient = room.state.bonusRound ? {
+    phase: room.state.bonusRound.phase,
+    topic: room.state.bonusRound.topic,
+    description: room.state.bonusRound.description,
+    category: room.state.bonusRound.category,
+    categoryIcon: room.state.bonusRound.categoryIcon,
+    questionType: room.state.bonusRound.questionType,
+    totalItems: room.state.bonusRound.items.length,
+    items: room.state.bonusRound.items.map(item => ({
+      id: item.id,
+      display: item.display,
+      group: item.group,
+      guessedBy: item.guessedBy,
+      guessedByName: item.guessedByName,
+      guessedAt: item.guessedAt,
+    })),
+    revealedCount: room.state.bonusRound.guessedIds.size,
+    currentTurn: room.state.bonusRound.activePlayers.length > 0 && room.state.bonusRound.phase === 'playing' ? (() => {
+      const currentPlayerId = room.state.bonusRound!.activePlayers[room.state.bonusRound!.currentTurnIndex % room.state.bonusRound!.activePlayers.length];
+      const player = room.players.get(currentPlayerId);
+      return player ? {
+        playerId: currentPlayerId,
+        playerName: player.name,
+        avatarSeed: player.avatarSeed,
+        turnNumber: room.state.bonusRound!.turnNumber,
+        timerEnd: room.state.timerEnd || 0,
+      } : null;
+    })() : null,
+    turnOrder: room.state.bonusRound.turnOrder,
+    activePlayers: room.state.bonusRound.activePlayers,
+    eliminatedPlayers: room.state.bonusRound.eliminatedPlayers,
+    lastGuess: room.state.bonusRound.lastGuess,
+    pointsPerCorrect: room.state.bonusRound.pointsPerCorrect,
+    timePerTurn: room.state.bonusRound.timePerTurn,
+    fuzzyThreshold: room.state.bonusRound.fuzzyThreshold,
+  } : null;
+
   return {
     code: room.code,
     players,
@@ -238,6 +353,7 @@ function roomToClient(room: GameRoom) {
     loserPickPlayerId: room.state.loserPickPlayerId,
     diceRoyale: diceRoyaleClient,
     rpsDuel: room.state.rpsDuel,
+    bonusRound: bonusRoundClient,
     timerEnd: room.state.timerEnd,
     showingCorrectAnswer: room.state.showingCorrectAnswer,
     wheelSelectedIndex: room.state.wheelSelectedIndex,
@@ -391,6 +507,27 @@ app.prepare().then(async () => {
       if (data.playerId !== duel.winnerId) return;
       finalizeRPSDuelPick(room, io, data.categoryId);
     });
+
+    // Bonus Round bot handlers
+    botManager.registerActionHandler('bonus_round_submit', (data) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'bonus_round') return;
+      const bonusRound = room.state.bonusRound;
+      if (!bonusRound || bonusRound.phase !== 'playing') return;
+      const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
+      if (data.playerId !== currentPlayerId) return;
+      handleBonusRoundAnswer(room, io, data.playerId, data.answer);
+    });
+
+    botManager.registerActionHandler('bonus_round_skip', (data) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'bonus_round') return;
+      const bonusRound = room.state.bonusRound;
+      if (!bonusRound || bonusRound.phase !== 'playing') return;
+      const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
+      if (data.playerId !== currentPlayerId) return;
+      handleBonusRoundSkip(room, io, data.playerId);
+    });
   }
 
   // ============================================
@@ -427,6 +564,12 @@ app.prepare().then(async () => {
           maxRounds: 5,
           questionsPerRound: 5,
           timePerQuestion: 20,
+          // Bonusrunden-Einstellungen
+          bonusRoundChance: 0, // Default: keine zufälligen Bonusrunden
+          finalRoundAlwaysBonus: false, // Default: letzte Runde normal
+          // Zukünftige Erweiterungen
+          enableEstimation: true, // Default: Schätzfragen aktiv
+          enableMediaQuestions: false, // Default: noch deaktiviert
         },
         state: {
           phase: 'lobby',
@@ -444,7 +587,10 @@ app.prepare().then(async () => {
           lastLoserPickRound: 0,
           diceRoyale: null,
           rpsDuel: null,
+          bonusRound: null,
           wheelSelectedIndex: null,
+          usedQuestionIds: new Set(),
+          usedBonusQuestionIds: new Set(),
         },
         createdAt: new Date(),
       };
@@ -756,6 +902,36 @@ app.prepare().then(async () => {
       }
     });
 
+    // === BONUS ROUND SUBMIT ===
+    socket.on('bonus_round_submit', (data: { roomCode: string; playerId: string; answer: string }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'bonus_round') return;
+      
+      const bonusRound = room.state.bonusRound;
+      if (!bonusRound || bonusRound.phase !== 'playing') return;
+      
+      // Check if it's this player's turn
+      const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
+      if (data.playerId !== currentPlayerId) return;
+      
+      handleBonusRoundAnswer(room, io, data.playerId, data.answer);
+    });
+
+    // === BONUS ROUND SKIP ===
+    socket.on('bonus_round_skip', (data: { roomCode: string; playerId: string }) => {
+      const room = rooms.get(data.roomCode);
+      if (!room || room.state.phase !== 'bonus_round') return;
+      
+      const bonusRound = room.state.bonusRound;
+      if (!bonusRound || bonusRound.phase !== 'playing') return;
+      
+      // Check if it's this player's turn
+      const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
+      if (data.playerId !== currentPlayerId) return;
+      
+      handleBonusRoundSkip(room, io, data.playerId);
+    });
+
     // === NEXT (Host only) ===
     socket.on('next', (data: { roomCode: string; playerId: string }) => {
       const room = rooms.get(data.roomCode);
@@ -767,12 +943,9 @@ app.prepare().then(async () => {
       if (room.state.phase === 'revealing' || room.state.phase === 'estimation_reveal') {
         proceedAfterReveal(room, io);
       } else if (room.state.phase === 'scoreboard') {
-        // Prüfen ob letzte Runde - dann zum Finale, nicht zur nächsten Kategorie
-        if (room.state.currentRound >= room.settings.maxRounds) {
-          showFinalResults(room, io);
-        } else {
-          startCategorySelection(room, io);
-        }
+        // startCategorySelection prüft selbst ob eine Bonusrunde kommt
+        // und ruft ggf. showFinalResults auf, wenn die letzte Runde bereits gespielt wurde
+        startCategorySelection(room, io);
       }
     });
 
@@ -847,7 +1020,7 @@ app.prepare().then(async () => {
             if (room.state.votingCategories.length > 0) {
               const randomCat = room.state.votingCategories[0];
               room.state.selectedCategory = randomCat.id;
-              room.state.roundQuestions = await getRandomQuestions(randomCat.id, room.settings.questionsPerRound);
+              room.state.roundQuestions = await getQuestionsForRoom(room, randomCat.id, room.settings.questionsPerRound);
               room.state.currentQuestionIndex = 0;
               startQuestion(room, io);
             }
@@ -883,6 +1056,32 @@ app.prepare().then(async () => {
         case 'skip_to_final': {
           showFinalResults(room, io);
           io.to(room.code).emit('dev_notification', { message: 'Finale angezeigt' });
+          break;
+        }
+
+        case 'start_bonus_round': {
+          // Start a bonus round with a random COLLECTIVE_LIST question from DB
+          const excludeIds = Array.from(room.state.usedBonusQuestionIds);
+          const bonusQuestion = await questionLoader.getRandomBonusRoundQuestion(excludeIds);
+          if (bonusQuestion) {
+            // Track used question
+            room.state.usedBonusQuestionIds.add(bonusQuestion.id);
+            
+            startBonusRound(room, io, {
+              topic: bonusQuestion.topic,
+              description: bonusQuestion.description,
+              category: bonusQuestion.category,
+              categoryIcon: bonusQuestion.categoryIcon,
+              questionType: bonusQuestion.questionType,
+              items: bonusQuestion.items,
+              timePerTurn: bonusQuestion.timePerTurn,
+              pointsPerCorrect: bonusQuestion.pointsPerCorrect,
+              fuzzyThreshold: bonusQuestion.fuzzyThreshold,
+            });
+            io.to(room.code).emit('dev_notification', { message: `Bonusrunde gestartet: ${bonusQuestion.topic}` });
+          } else {
+            io.to(room.code).emit('dev_notification', { message: 'Keine Bonusrunden-Frage in DB gefunden!' });
+          }
           break;
         }
       }
@@ -977,26 +1176,25 @@ app.prepare().then(async () => {
     }
 
     const connectedPlayers = Array.from(room.players.values()).filter(p => p.isConnected);
-    // Need at least 2 players for RPS duel
-    const canDoRPSDuel = connectedPlayers.length >= 2;
+    const playerCount = connectedPlayers.length;
     
-    // Loser's Pick cooldown: can't happen two rounds in a row
-    const canDoLosersPick = room.state.currentRound - room.state.lastLoserPickRound >= 2;
-    
-    const rand = Math.random() * 100;
-    
-    // Distribution: Voting 25%, Wheel 25%, Loser's Pick 15%, Dice Royale 20%, RPS Duel 15%
-    if (canDoLosersPick && rand < 15) {
-      return 'losers_pick';
-    } else if (rand < 35) { // 15-35% = 20% for Dice Royale (all players)
-      return 'dice_royale';
-    } else if (canDoRPSDuel && rand < 50) { // 35-50% = 15% for RPS Duel
-      return 'rps_duel';
-    } else if (rand < 75) { // 50-75% = 25% for wheel
-      return 'wheel';
-    } else {
-      return 'voting'; // 75-100% = 25% for voting
+    // Baue lastModeRounds Map für Cooldown-Prüfung
+    // Aktuell tracken wir nur lastLoserPickRound, erweitern wir zu einer Map
+    const lastModeRounds = new Map<string, number>();
+    if (room.state.lastLoserPickRound > 0) {
+      lastModeRounds.set('losers_pick', room.state.lastLoserPickRound);
     }
+    
+    // Nutze zentrale Config für gewichtete Zufallsauswahl
+    const selectedMode = selectRandomCategoryMode(
+      playerCount, 
+      lastModeRounds, 
+      room.state.currentRound
+    );
+    
+    console.log(`🎯 Selected category mode: ${selectedMode.name} (${selectedMode.id}) for ${playerCount} players`);
+    
+    return selectedMode.id as CategorySelectionMode;
   }
 
   function getLoserPlayer(room: GameRoom): Player | null {
@@ -1007,6 +1205,80 @@ app.prepare().then(async () => {
   }
 
   async function startCategorySelection(room: GameRoom, io: SocketServer) {
+    // === RUNDENERHÖHUNG ===
+    // Wenn wir vom Scoreboard kommen (nicht von Lobby), erhöhen wir die Runde
+    const comingFromScoreboard = room.state.phase === 'scoreboard';
+    
+    if (comingFromScoreboard) {
+      room.state.currentRound++;
+      console.log(`📈 Round incremented to ${room.state.currentRound}/${room.settings.maxRounds}`);
+    }
+    
+    // === PRÜFEN OB SPIEL VORBEI ===
+    // Wenn currentRound > maxRounds, dann sind alle Runden gespielt
+    if (room.state.currentRound > room.settings.maxRounds) {
+      console.log(`🏁 All ${room.settings.maxRounds} rounds completed, showing final results`);
+      showFinalResults(room, io);
+      return;
+    }
+
+    // === BONUSRUNDEN-LOGIK ===
+    // Prüfen ob diese Runde eine Bonusrunde werden soll
+    const isLastRound = room.state.currentRound === room.settings.maxRounds;
+    const shouldBeBonusRound = 
+      (isLastRound && room.settings.finalRoundAlwaysBonus) ||
+      (!isLastRound && room.settings.bonusRoundChance > 0 && Math.random() * 100 < room.settings.bonusRoundChance);
+    
+    console.log(`🎮 Round ${room.state.currentRound}/${room.settings.maxRounds} - isLastRound: ${isLastRound}, shouldBeBonusRound: ${shouldBeBonusRound}`);
+
+    if (shouldBeBonusRound) {
+      console.log(`🎯 Round ${room.state.currentRound}: BONUS ROUND triggered!`);
+      
+      // Versuche eine Bonusrunden-Frage aus der DB zu laden (mit Duplikat-Vermeidung)
+      const excludeIds = Array.from(room.state.usedBonusQuestionIds);
+      const bonusQuestion = await questionLoader.getRandomBonusRoundQuestion(excludeIds);
+      if (bonusQuestion) {
+        // Track used question
+        room.state.usedBonusQuestionIds.add(bonusQuestion.id);
+        
+        // Zeige zuerst die Bonusrunden-Ankündigung mit Roulette
+        room.state.phase = 'bonus_round_announcement';
+        room.state.categorySelectionMode = null;
+        
+        // Speichere die Bonusfrage für später
+        (room as any).pendingBonusQuestion = bonusQuestion;
+        
+        emitPhaseChange(room, io, 'bonus_round_announcement');
+        io.to(room.code).emit('room_update', roomToClient(room));
+        
+        // Nach dem Roulette + Beschreibung (5.5s) starte die eigentliche Bonusrunde
+        setTimeout(() => {
+          const pendingQuestion = (room as any).pendingBonusQuestion;
+          delete (room as any).pendingBonusQuestion;
+          
+          if (pendingQuestion) {
+            startBonusRound(room, io, {
+              topic: pendingQuestion.topic,
+              description: pendingQuestion.description,
+              category: pendingQuestion.category,
+              categoryIcon: pendingQuestion.categoryIcon,
+              questionType: pendingQuestion.questionType,
+              items: pendingQuestion.items,
+              timePerTurn: pendingQuestion.timePerTurn,
+              pointsPerCorrect: pendingQuestion.pointsPerCorrect,
+              fuzzyThreshold: pendingQuestion.fuzzyThreshold,
+            });
+          }
+        }, 5500); // Match the normal round announcement timing
+        
+        return; // Beende früh, Bonusrunde läuft jetzt
+      } else {
+        console.log(`⚠️ No bonus round question found in DB, falling back to normal round`);
+        // Fallback: normale Runde wenn keine Bonusfrage vorhanden
+      }
+    }
+
+    // === NORMALE RUNDE ===
     const mode = selectCategoryMode(room);
     room.state.categorySelectionMode = mode;
     // 8 categories for wheel, but voting/loser's pick will use all of them too
@@ -1039,7 +1311,8 @@ app.prepare().then(async () => {
     io.to(room.code).emit('category_mode', announcementData);
     io.to(room.code).emit('room_update', roomToClient(room));
 
-    // After announcement, start the actual selection
+    // After announcement + roulette animation + description display, start the actual selection
+    // Roulette: ~3s spin, then ~2s for description display
     setTimeout(() => {
       if (room.state.categorySelectionMode === 'voting') {
         startCategoryVoting(room, io);
@@ -1052,7 +1325,7 @@ app.prepare().then(async () => {
       } else if (room.state.categorySelectionMode === 'rps_duel') {
         startRPSDuel(room, io);
       }
-    }, 3000); // 3 seconds for announcement
+    }, 5500); // 5.5 seconds: ~3s roulette + ~2.5s description
   }
 
   function startCategoryVoting(room: GameRoom, io: SocketServer) {
@@ -1292,7 +1565,7 @@ app.prepare().then(async () => {
 
   async function finalizeDiceRoyalePick(room: GameRoom, io: SocketServer, categoryId: string) {
     room.state.selectedCategory = categoryId;
-    room.state.roundQuestions = await getRandomQuestions(categoryId, room.settings.questionsPerRound);
+    room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
 
     const categoryData = await getCategoryData(categoryId);
@@ -1539,7 +1812,7 @@ app.prepare().then(async () => {
 
   async function finalizeRPSDuelPick(room: GameRoom, io: SocketServer, categoryId: string) {
     room.state.selectedCategory = categoryId;
-    room.state.roundQuestions = await getRandomQuestions(categoryId, room.settings.questionsPerRound);
+    room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
 
     const categoryData = await getCategoryData(categoryId);
@@ -1563,7 +1836,7 @@ app.prepare().then(async () => {
 
   async function finalizeWheelSelection(room: GameRoom, io: SocketServer, categoryId: string) {
     room.state.selectedCategory = categoryId;
-    room.state.roundQuestions = await getRandomQuestions(categoryId, room.settings.questionsPerRound);
+    room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
     room.state.wheelSelectedIndex = null; // Clear wheel index
 
@@ -1582,7 +1855,7 @@ app.prepare().then(async () => {
 
   async function finalizeLosersPick(room: GameRoom, io: SocketServer, categoryId: string) {
     room.state.selectedCategory = categoryId;
-    room.state.roundQuestions = await getRandomQuestions(categoryId, room.settings.questionsPerRound);
+    room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
 
     const categoryData = await getCategoryData(categoryId);
@@ -1624,7 +1897,7 @@ app.prepare().then(async () => {
       : room.state.votingCategories[Math.floor(Math.random() * room.state.votingCategories.length)]?.id;
 
     room.state.selectedCategory = selectedCategoryId;
-    room.state.roundQuestions = await getRandomQuestions(selectedCategoryId, room.settings.questionsPerRound);
+    room.state.roundQuestions = await getQuestionsForRoom(room, selectedCategoryId, room.settings.questionsPerRound);
     room.state.currentQuestionIndex = 0;
 
     const categoryData = await getCategoryData(selectedCategoryId);
@@ -1911,12 +2184,10 @@ app.prepare().then(async () => {
 
     emitPhaseChange(room, io, 'scoreboard');
     io.to(room.code).emit('room_update', roomToClient(room));
-
-    // Runde nur erhöhen wenn es NICHT die letzte Runde ist
-    // Der Übergang zum Finale wird durch Host-Klick oder automatisch gesteuert
-    if (room.state.currentRound < room.settings.maxRounds) {
-      room.state.currentRound++;
-    }
+    
+    // WICHTIG: currentRound wird NICHT hier erhöht!
+    // Die Erhöhung passiert in startCategorySelection, nachdem geprüft wurde
+    // ob die aktuelle Runde bereits die letzte war.
   }
 
   function showFinalResults(room: GameRoom, io: SocketServer) {
@@ -1934,6 +2205,417 @@ app.prepare().then(async () => {
 
     io.to(room.code).emit('game_over', { rankings: finalRankings });
     io.to(room.code).emit('room_update', roomToClient(room));
+  }
+
+  // ============================================
+  // BONUS ROUND LOGIC
+  // ============================================
+
+  interface BonusRoundConfig {
+    topic: string;
+    description?: string;
+    category?: string;
+    categoryIcon?: string;
+    questionType?: string; // z.B. "Liste", "Sortieren"
+    items: Array<{ id: string; display: string; aliases: string[]; group?: string }>;
+    timePerTurn?: number;
+    fuzzyThreshold?: number;
+    pointsPerCorrect?: number;
+  }
+
+  function startBonusRound(room: GameRoom, io: SocketServer, config: BonusRoundConfig) {
+    // Sort players by score (worst to best) for turn order
+    const sortedPlayers = Array.from(room.players.values())
+      .filter(p => p.isConnected)
+      .sort((a, b) => a.score - b.score);
+    
+    const turnOrder = sortedPlayers.map(p => p.id);
+
+    room.state.bonusRound = {
+      phase: 'intro',
+      topic: config.topic,
+      description: config.description,
+      category: config.category,
+      categoryIcon: config.categoryIcon,
+      questionType: config.questionType || 'Liste',
+      items: config.items.map(item => ({
+        id: item.id,
+        display: item.display,
+        aliases: item.aliases,
+        group: item.group,
+      })),
+      guessedIds: new Set(),
+      currentTurnIndex: 0,
+      playerCorrectCounts: new Map(),
+      currentTurnTimer: null,
+      turnOrder,
+      activePlayers: [...turnOrder],
+      eliminatedPlayers: [],
+      pointsPerCorrect: config.pointsPerCorrect ?? 200,
+      timePerTurn: config.timePerTurn ?? 15,
+      fuzzyThreshold: config.fuzzyThreshold ?? 0.85,
+      turnNumber: 0,
+    };
+
+    room.state.phase = 'bonus_round';
+    emitPhaseChange(room, io, 'bonus_round');
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // After intro delay, start playing
+    setTimeout(() => {
+      if (room.state.bonusRound) {
+        room.state.bonusRound.phase = 'playing';
+        startBonusRoundTurn(room, io);
+      }
+    }, 3000);
+  }
+
+  function startBonusRoundTurn(room: GameRoom, io: SocketServer) {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound || bonusRound.activePlayers.length === 0) return;
+
+    // Clear any existing timer
+    if (bonusRound.currentTurnTimer) {
+      clearTimeout(bonusRound.currentTurnTimer);
+    }
+
+    bonusRound.turnNumber++;
+    bonusRound.currentTurnIndex = bonusRound.currentTurnIndex % bonusRound.activePlayers.length;
+    
+    const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex];
+    const player = room.players.get(currentPlayerId);
+    
+    // Set timer
+    room.state.timerEnd = Date.now() + (bonusRound.timePerTurn * 1000);
+    
+    console.log(`🎯 Bonus Round Turn ${bonusRound.turnNumber}: ${player?.name}'s turn (${bonusRound.timePerTurn}s)`);
+    
+    io.to(room.code).emit('bonus_round_turn', {
+      playerId: currentPlayerId,
+      playerName: player?.name,
+      turnNumber: bonusRound.turnNumber,
+      timerEnd: room.state.timerEnd,
+    });
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Notify bots if it's their turn
+    if (dev) {
+      botManager.onBonusRoundTurn(room.code, currentPlayerId);
+    }
+
+    // Set timeout for this turn
+    bonusRound.currentTurnTimer = setTimeout(() => {
+      handleBonusRoundTimeout(room, io, currentPlayerId);
+    }, bonusRound.timePerTurn * 1000);
+  }
+
+  function handleBonusRoundAnswer(room: GameRoom, io: SocketServer, playerId: string, answer: string) {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound) return;
+
+    // Clear timer
+    if (bonusRound.currentTurnTimer) {
+      clearTimeout(bonusRound.currentTurnTimer);
+      bonusRound.currentTurnTimer = null;
+    }
+
+    const player = room.players.get(playerId);
+    if (!player) return;
+
+    // Check the answer using fuzzy matching
+    const result = fuzzyCheckAnswer(
+      answer,
+      bonusRound.items,
+      bonusRound.guessedIds,
+      bonusRound.fuzzyThreshold
+    );
+
+    console.log(`🎯 ${player.name} answered: "${answer}" -> ${result.matchType} (${(result.confidence * 100).toFixed(0)}%)`);
+
+    if (result.alreadyGuessed) {
+      // Already guessed - player is eliminated
+      bonusRound.lastGuess = {
+        playerId,
+        playerName: player.name,
+        input: answer,
+        result: 'already_guessed',
+        matchedDisplay: result.matchedDisplay || undefined,
+        confidence: result.confidence,
+      };
+      eliminatePlayer(room, io, playerId, 'wrong');
+    } else if (result.isMatch && result.matchedItemId) {
+      // Correct answer!
+      bonusRound.guessedIds.add(result.matchedItemId);
+      
+      // Update the item with who guessed it
+      const item = bonusRound.items.find(i => i.id === result.matchedItemId);
+      if (item) {
+        item.guessedBy = playerId;
+        item.guessedByName = player.name;
+        item.guessedAt = Date.now();
+      }
+
+      // Award points
+      player.score += bonusRound.pointsPerCorrect;
+      
+      // Track correct answer count for this player
+      const currentCount = bonusRound.playerCorrectCounts.get(playerId) || 0;
+      bonusRound.playerCorrectCounts.set(playerId, currentCount + 1);
+
+      bonusRound.lastGuess = {
+        playerId,
+        playerName: player.name,
+        input: answer,
+        result: 'correct',
+        matchedDisplay: result.matchedDisplay || undefined,
+        confidence: result.confidence,
+      };
+
+      io.to(room.code).emit('bonus_round_correct', {
+        playerId,
+        playerName: player.name,
+        itemId: result.matchedItemId,
+        itemDisplay: result.matchedDisplay,
+        points: bonusRound.pointsPerCorrect,
+        newScore: player.score,
+        confidence: result.confidence,
+        matchType: result.matchType,
+      });
+
+      // Check if all items have been guessed
+      if (bonusRound.guessedIds.size >= bonusRound.items.length) {
+        endBonusRound(room, io, 'all_guessed');
+        return;
+      }
+
+      // Move to next player
+      bonusRound.currentTurnIndex = (bonusRound.currentTurnIndex + 1) % bonusRound.activePlayers.length;
+      
+      io.to(room.code).emit('room_update', roomToClient(room));
+      
+      // Small delay before next turn
+      setTimeout(() => {
+        startBonusRoundTurn(room, io);
+      }, 1500);
+    } else {
+      // Wrong answer - player is eliminated
+      bonusRound.lastGuess = {
+        playerId,
+        playerName: player.name,
+        input: answer,
+        result: 'wrong',
+        confidence: result.confidence,
+      };
+      eliminatePlayer(room, io, playerId, 'wrong');
+    }
+  }
+
+  function handleBonusRoundSkip(room: GameRoom, io: SocketServer, playerId: string) {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound) return;
+
+    // Clear timer
+    if (bonusRound.currentTurnTimer) {
+      clearTimeout(bonusRound.currentTurnTimer);
+      bonusRound.currentTurnTimer = null;
+    }
+
+    const player = room.players.get(playerId);
+    if (!player) return;
+
+    console.log(`⏭️ ${player.name} skipped their turn`);
+
+    bonusRound.lastGuess = {
+      playerId,
+      playerName: player.name,
+      input: '',
+      result: 'skip',
+    };
+
+    eliminatePlayer(room, io, playerId, 'skip');
+  }
+
+  function handleBonusRoundTimeout(room: GameRoom, io: SocketServer, playerId: string) {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound) return;
+
+    const player = room.players.get(playerId);
+    if (!player) return;
+
+    console.log(`⏰ ${player.name} timed out`);
+
+    bonusRound.lastGuess = {
+      playerId,
+      playerName: player.name,
+      input: '',
+      result: 'timeout',
+    };
+
+    eliminatePlayer(room, io, playerId, 'timeout');
+  }
+
+  function eliminatePlayer(room: GameRoom, io: SocketServer, playerId: string, reason: 'wrong' | 'timeout' | 'skip') {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound) return;
+
+    const player = room.players.get(playerId);
+    if (!player) return;
+
+    // Remove from active players
+    const playerIndex = bonusRound.activePlayers.indexOf(playerId);
+    if (playerIndex === -1) return;
+
+    bonusRound.activePlayers.splice(playerIndex, 1);
+
+    // Calculate rank (higher = worse, as they were eliminated earlier)
+    // Rank = total players - already eliminated = position from bottom
+    // First eliminated gets highest rank (worst), last standing gets rank 1 (best)
+    const totalPlayers = bonusRound.turnOrder.length;
+    const rank = totalPlayers - bonusRound.eliminatedPlayers.length;
+
+    bonusRound.eliminatedPlayers.push({
+      playerId,
+      playerName: player.name,
+      avatarSeed: player.avatarSeed,
+      eliminationReason: reason,
+      rank,
+    });
+
+    io.to(room.code).emit('bonus_round_eliminate', {
+      playerId,
+      playerName: player.name,
+      reason,
+      rank,
+      remainingPlayers: bonusRound.activePlayers.length,
+    });
+
+    console.log(`❌ ${player.name} eliminated (${reason}). ${bonusRound.activePlayers.length} players remaining.`);
+
+    // Check if only one player remains (winner)
+    if (bonusRound.activePlayers.length <= 1) {
+      endBonusRound(room, io, 'last_standing');
+      return;
+    }
+
+    // Adjust turn index if needed
+    if (playerIndex <= bonusRound.currentTurnIndex) {
+      bonusRound.currentTurnIndex = Math.max(0, bonusRound.currentTurnIndex - 1);
+    }
+    bonusRound.currentTurnIndex = bonusRound.currentTurnIndex % bonusRound.activePlayers.length;
+
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Small delay before next turn
+    setTimeout(() => {
+      startBonusRoundTurn(room, io);
+    }, 2000);
+  }
+
+  function endBonusRound(room: GameRoom, io: SocketServer, reason: 'last_standing' | 'all_guessed') {
+    const bonusRound = room.state.bonusRound;
+    if (!bonusRound) return;
+
+    // Clear any timer
+    if (bonusRound.currentTurnTimer) {
+      clearTimeout(bonusRound.currentTurnTimer);
+      bonusRound.currentTurnTimer = null;
+    }
+
+    bonusRound.phase = 'finished';
+
+    // Award bonus points to winners (remaining active players)
+    const winners = bonusRound.activePlayers;
+    const winnerBonus = winners.length === 1 ? 500 : 250; // More bonus if sole winner
+    
+    winners.forEach((playerId, index) => {
+      const player = room.players.get(playerId);
+      if (player) {
+        player.score += winnerBonus;
+        
+        // Add to eliminated with rank 1 (or tied for 1st)
+        bonusRound.eliminatedPlayers.push({
+          playerId,
+          playerName: player.name,
+          avatarSeed: player.avatarSeed,
+          eliminationReason: 'skip', // Not really eliminated, but we reuse the structure
+          rank: 1,
+        });
+      }
+    });
+
+    // Re-sort eliminated players by rank
+    bonusRound.eliminatedPlayers.sort((a, b) => a.rank - b.rank);
+
+    // Calculate detailed points breakdown for all players
+    const playerScoreBreakdown: Array<{
+      playerId: string;
+      playerName: string;
+      avatarSeed: string;
+      correctAnswers: number;
+      correctPoints: number;
+      rankBonus: number;
+      totalPoints: number;
+      rank: number;
+    }> = [];
+
+    // Get all players who participated (from turnOrder)
+    bonusRound.turnOrder.forEach(playerId => {
+      const player = room.players.get(playerId);
+      if (!player) return;
+      
+      const correctAnswers = bonusRound.playerCorrectCounts.get(playerId) || 0;
+      const correctPoints = correctAnswers * bonusRound.pointsPerCorrect;
+      
+      // Check if this player is a winner
+      const isWinner = winners.includes(playerId);
+      const rankBonus = isWinner ? winnerBonus : 0;
+      
+      // Find their rank
+      const eliminatedEntry = bonusRound.eliminatedPlayers.find(e => e.playerId === playerId);
+      const rank = eliminatedEntry?.rank || 999;
+      
+      playerScoreBreakdown.push({
+        playerId,
+        playerName: player.name,
+        avatarSeed: player.avatarSeed,
+        correctAnswers,
+        correctPoints,
+        rankBonus,
+        totalPoints: correctPoints + rankBonus,
+        rank,
+      });
+    });
+
+    // Sort by rank
+    playerScoreBreakdown.sort((a, b) => a.rank - b.rank);
+
+    console.log(`🏆 Bonus Round ended (${reason}). Winners: ${winners.map(id => room.players.get(id)?.name).join(', ')}`);
+    console.log(`📊 Score breakdown:`, playerScoreBreakdown.map(p => `${p.playerName}: ${p.correctAnswers}x${bonusRound.pointsPerCorrect}=${p.correctPoints} + ${p.rankBonus} rank = ${p.totalPoints}`));
+
+    io.to(room.code).emit('bonus_round_end', {
+      reason,
+      winners: winners.map(id => {
+        const p = room.players.get(id);
+        return { playerId: id, playerName: p?.name, avatarSeed: p?.avatarSeed };
+      }),
+      winnerBonus,
+      pointsPerCorrect: bonusRound.pointsPerCorrect,
+      totalRevealed: bonusRound.guessedIds.size,
+      totalItems: bonusRound.items.length,
+      rankings: bonusRound.eliminatedPlayers,
+      playerScoreBreakdown,
+    });
+
+    room.state.phase = 'bonus_round_result';
+    room.state.timerEnd = null;
+    io.to(room.code).emit('room_update', roomToClient(room));
+
+    // Auto-advance after showing results
+    setTimeout(() => {
+      // Nach der Bonusrunde zum Scoreboard, dort kann der Host dann "Weiter" drücken
+      // Die Rundenerhöhung und Finale-Prüfung passiert dann in startCategorySelection
+      showScoreboard(room, io);
+    }, 8000);
   }
 
   // ============================================

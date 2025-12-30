@@ -21,7 +21,13 @@ import {
   Minus,
   Plus,
   Sparkles,
-  Dices
+  Dices,
+  Gift,
+  Percent,
+  Trophy,
+  Settings2,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 
 // Animated Avatar Component with idle animations
@@ -302,14 +308,159 @@ function SettingControl({
   );
 }
 
-// Game summary based on settings
-function GameSummary({ rounds, questionsPerRound }: { rounds: number; questionsPerRound: number }) {
-  const totalQuestions = rounds * questionsPerRound;
-  const estimatedMinutes = Math.round(totalQuestions * 0.5); // ~30s per question
+// Toggle control for boolean settings
+function ToggleControl({
+  label,
+  value,
+  onChange,
+  icon: Icon,
+  description,
+}: {
+  label: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  icon: React.ElementType;
+  description: string;
+}) {
+  return (
+    <motion.button
+      onClick={() => onChange(!value)}
+      className={`glass rounded-xl p-4 relative overflow-hidden group text-left w-full transition-all ${
+        value ? 'ring-2 ring-primary/50 bg-primary/5' : ''
+      }`}
+      whileHover={{ scale: 1.02 }}
+      whileTap={{ scale: 0.98 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <div className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+            value ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+          }`}>
+            <Icon className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="font-semibold text-sm block">{label}</span>
+            <span className="text-xs text-muted-foreground">{description}</span>
+          </div>
+        </div>
+        
+        {/* Toggle Switch */}
+        <div className={`w-12 h-7 rounded-full p-1 transition-colors ${
+          value ? 'bg-primary' : 'bg-muted'
+        }`}>
+          <motion.div
+            className="w-5 h-5 rounded-full bg-white shadow-sm"
+            animate={{ x: value ? 20 : 0 }}
+            transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+          />
+        </div>
+      </div>
+    </motion.button>
+  );
+}
+
+// Percentage control for bonus round chance
+function PercentControl({
+  label,
+  value,
+  onChange,
+  icon: Icon,
+  description,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+  icon: React.ElementType;
+  description: string;
+}) {
+  const options = [0, 10, 25, 50, 75, 100];
+  const currentIndex = options.indexOf(value);
+  const canDecrease = currentIndex > 0;
+  const canIncrease = currentIndex < options.length - 1;
 
   return (
     <motion.div 
-      className="flex items-center justify-center gap-4 text-xs text-muted-foreground"
+      className="glass rounded-xl p-4 relative overflow-hidden group"
+      whileHover={{ scale: 1.02 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 25 }}
+    >
+      <div className="flex items-center gap-2 mb-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${
+          value > 0 ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'
+        }`}>
+          <Icon className="w-4 h-4" />
+        </div>
+        <div>
+          <span className="font-semibold text-sm block">{label}</span>
+          <span className="text-xs text-muted-foreground">{description}</span>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => canDecrease && onChange(options[currentIndex - 1])}
+          disabled={!canDecrease}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+            canDecrease 
+              ? 'bg-muted hover:bg-muted/80 text-foreground' 
+              : 'bg-muted/30 text-muted-foreground/30 cursor-not-allowed'
+          }`}
+        >
+          <Minus className="w-4 h-4" />
+        </motion.button>
+
+        <motion.div 
+          className="flex-1 text-center"
+          key={value}
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+        >
+          <span className={`text-2xl font-black ${value > 0 ? 'text-primary' : 'text-muted-foreground'}`}>
+            {value}%
+          </span>
+        </motion.div>
+
+        <motion.button
+          whileHover={{ scale: 1.1 }}
+          whileTap={{ scale: 0.9 }}
+          onClick={() => canIncrease && onChange(options[currentIndex + 1])}
+          disabled={!canIncrease}
+          className={`w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+            canIncrease 
+              ? 'bg-muted hover:bg-muted/80 text-foreground' 
+              : 'bg-muted/30 text-muted-foreground/30 cursor-not-allowed'
+          }`}
+        >
+          <Plus className="w-4 h-4" />
+        </motion.button>
+      </div>
+    </motion.div>
+  );
+}
+
+// Game summary based on settings
+function GameSummary({ 
+  rounds, 
+  questionsPerRound,
+  bonusRoundChance,
+  finalRoundAlwaysBonus,
+}: { 
+  rounds: number; 
+  questionsPerRound: number;
+  bonusRoundChance: number;
+  finalRoundAlwaysBonus: boolean;
+}) {
+  const totalQuestions = rounds * questionsPerRound;
+  const estimatedMinutes = Math.round(totalQuestions * 0.5); // ~30s per question
+  const hasBonusRounds = bonusRoundChance > 0 || finalRoundAlwaysBonus;
+
+  return (
+    <motion.div 
+      className="flex flex-wrap items-center justify-center gap-4 text-xs text-muted-foreground"
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: 0.2 }}
@@ -323,6 +474,15 @@ function GameSummary({ rounds, questionsPerRound }: { rounds: number; questionsP
         <Clock className="w-3.5 h-3.5" />
         <span>~{estimatedMinutes} Min</span>
       </div>
+      {hasBonusRounds && (
+        <>
+          <div className="w-1 h-1 rounded-full bg-muted-foreground/30" />
+          <div className="flex items-center gap-1.5 text-primary">
+            <Gift className="w-3.5 h-3.5" />
+            <span>Bonusrunden aktiv</span>
+          </div>
+        </>
+      )}
     </motion.div>
   );
 }
@@ -338,6 +498,7 @@ export function LobbyScreen() {
   const [linkCopied, setLinkCopied] = useState(false);
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   if (!room) return null;
 
@@ -592,7 +753,7 @@ export function LobbyScreen() {
       >
         {isHost ? (
           <div className="space-y-5">
-            {/* Enhanced Settings */}
+            {/* Basic Settings */}
             <div className="grid grid-cols-2 gap-4">
               <SettingControl
                 label="Runden"
@@ -613,10 +774,66 @@ export function LobbyScreen() {
               />
             </div>
 
+            {/* Advanced Settings Toggle */}
+            <motion.button
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              whileHover={{ scale: 1.01 }}
+              whileTap={{ scale: 0.99 }}
+            >
+              <Settings2 className="w-4 h-4" />
+              <span>Erweiterte Einstellungen</span>
+              <motion.div
+                animate={{ rotate: showAdvanced ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ChevronDown className="w-4 h-4" />
+              </motion.div>
+            </motion.button>
+
+            {/* Advanced Settings Panel */}
+            <AnimatePresence>
+              {showAdvanced && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  exit={{ opacity: 0, height: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-4 overflow-hidden"
+                >
+                  {/* Bonusrunden-Einstellungen */}
+                  <div className="glass rounded-xl p-4 space-y-4">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+                      <Gift className="w-4 h-4" />
+                      <span>Bonusrunden</span>
+                    </div>
+                    
+                    <ToggleControl
+                      label="Finale = Bonusrunde"
+                      value={room.settings.finalRoundAlwaysBonus ?? false}
+                      onChange={(value) => updateSettings({ finalRoundAlwaysBonus: value })}
+                      icon={Trophy}
+                      description="Letzte Runde immer als Bonusrunde"
+                    />
+
+                    <PercentControl
+                      label="Zufällige Bonusrunden"
+                      value={room.settings.bonusRoundChance ?? 0}
+                      onChange={(value) => updateSettings({ bonusRoundChance: value })}
+                      icon={Percent}
+                      description="Chance pro Runde"
+                    />
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Game Summary */}
             <GameSummary 
               rounds={room.settings.maxRounds} 
-              questionsPerRound={room.settings.questionsPerRound} 
+              questionsPerRound={room.settings.questionsPerRound}
+              bonusRoundChance={room.settings.bonusRoundChance ?? 0}
+              finalRoundAlwaysBonus={room.settings.finalRoundAlwaysBonus ?? false}
             />
 
             {error && (

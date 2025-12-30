@@ -15,6 +15,7 @@ import {
   SkipForward,
   Dices,
   Swords,
+  ListChecks,
 } from 'lucide-react';
 import { getSocket } from '@/lib/socket';
 import { useGameStore } from '@/store/gameStore';
@@ -51,6 +52,7 @@ export function DevPanel() {
   const skipToScoreboard = () => devCommand('skip_to_scoreboard');
   const skipToFinal = () => devCommand('skip_to_final');
   const setRandomScores = () => devCommand('randomize_scores');
+  const startBonusRound = () => devCommand('start_bonus_round');
 
   if (!room) return null;
 
@@ -165,6 +167,16 @@ export function DevPanel() {
                         <DevButton onClick={skipToEstimation} icon={Play} label="Schätzung" color="orange" />
                         <DevButton onClick={skipToScoreboard} icon={SkipForward} label="Scoreboard" color="indigo" />
                         <DevButton onClick={skipToFinal} icon={SkipForward} label="Finale" color="rose" />
+                      </div>
+                    </div>
+
+                    {/* Bonus Round */}
+                    <div>
+                      <h4 className="text-xs text-zinc-400 mb-2 uppercase tracking-wider">
+                        Bonusrunde
+                      </h4>
+                      <div className="grid grid-cols-1 gap-2">
+                        <DevButton onClick={startBonusRound} icon={ListChecks} label="📋 Sammel-Liste starten" color="amber" />
                       </div>
                     </div>
 

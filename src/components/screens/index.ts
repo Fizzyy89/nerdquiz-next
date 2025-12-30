@@ -1,6 +1,7 @@
 export { HomeScreen } from './HomeScreen';
 export { LobbyScreen } from './LobbyScreen';
-export { CategoryAnnouncementScreen } from './CategoryAnnouncementScreen';
+export { RoundAnnouncementScreen } from './RoundAnnouncementScreen';
+// CategoryAnnouncementScreen ist deprecated, nutze RoundAnnouncementScreen
 export { VotingScreen } from './VotingScreen';
 export { CategoryWheelScreen } from './CategoryWheelScreen';
 export { LosersPickScreen } from './LosersPickScreen';
@@ -11,3 +12,4 @@ export { EstimationScreen } from './EstimationScreen';
 export { EstimationRevealScreen } from './EstimationRevealScreen';
 export { ScoreboardScreen } from './ScoreboardScreen';
 export { FinalScreen } from './FinalScreen';
+export { BonusRoundScreen } from './BonusRoundScreen';

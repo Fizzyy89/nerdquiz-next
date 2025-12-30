@@ -99,13 +99,14 @@ async function getQuestions(params: SearchParams) {
 }
 
 function QuestionTypeLabel({ type }: { type: QuestionType }) {
-  const config = {
+  const config: Record<QuestionType, { label: string; color: string }> = {
     MULTIPLE_CHOICE: { label: 'Multiple Choice', color: 'bg-blue-500/20 text-blue-400' },
     ESTIMATION: { label: 'Schätzfrage', color: 'bg-purple-500/20 text-purple-400' },
     TRUE_FALSE: { label: 'Wahr/Falsch', color: 'bg-green-500/20 text-green-400' },
     SORTING: { label: 'Sortieren', color: 'bg-orange-500/20 text-orange-400' },
     TEXT_INPUT: { label: 'Freitext', color: 'bg-cyan-500/20 text-cyan-400' },
     MATCHING: { label: 'Zuordnung', color: 'bg-pink-500/20 text-pink-400' },
+    COLLECTIVE_LIST: { label: 'Sammel-Liste', color: 'bg-amber-500/20 text-amber-400' },
   };
   
   const { label, color } = config[type] || { label: type, color: 'bg-muted' };
@@ -151,6 +152,16 @@ function QuestionPreview({ content, type }: { content: unknown; type: QuestionTy
     return (
       <div className="text-xs text-muted-foreground mt-1">
         Antwort: {parsed.correctValue} {parsed.unit}
+      </div>
+    );
+  }
+  
+  if (type === 'COLLECTIVE_LIST') {
+    const listContent = parsed as any;
+    const itemCount = listContent?.items?.length || 0;
+    return (
+      <div className="text-xs text-muted-foreground mt-1">
+        📋 {itemCount} Begriffe • {listContent?.timePerTurn || 15}s pro Zug
       </div>
     );
   }

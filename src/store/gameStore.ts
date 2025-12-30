@@ -5,6 +5,28 @@
 import { create } from 'zustand';
 import type { RoomState, AnswerResult, FinalRanking, Player } from '@/types/game';
 
+// Bonus Round End Result
+export interface BonusRoundPlayerScore {
+  playerId: string;
+  playerName: string;
+  avatarSeed: string;
+  correctAnswers: number;
+  correctPoints: number;
+  rankBonus: number;
+  totalPoints: number;
+  rank: number;
+}
+
+export interface BonusRoundEndResult {
+  reason: 'last_standing' | 'all_guessed';
+  winners: Array<{ playerId: string; playerName: string; avatarSeed: string }>;
+  winnerBonus: number;
+  pointsPerCorrect: number;
+  totalRevealed: number;
+  totalItems: number;
+  playerScoreBreakdown: BonusRoundPlayerScore[];
+}
+
 interface GameStore {
   // Connection
   isConnected: boolean;
@@ -22,6 +44,7 @@ interface GameStore {
   // Results
   lastResults: AnswerResult[] | null;
   finalRankings: FinalRanking[] | null;
+  bonusRoundResult: BonusRoundEndResult | null;
   
   // Actions
   setConnected: (connected: boolean) => void;
@@ -32,6 +55,7 @@ interface GameStore {
   setHasSubmitted: (submitted: boolean) => void;
   setLastResults: (results: AnswerResult[] | null) => void;
   setFinalRankings: (rankings: FinalRanking[] | null) => void;
+  setBonusRoundResult: (result: BonusRoundEndResult | null) => void;
   
   // Utility
   reset: () => void;
@@ -48,6 +72,7 @@ const initialState = {
   hasSubmitted: false,
   lastResults: null as AnswerResult[] | null,
   finalRankings: null as FinalRanking[] | null,
+  bonusRoundResult: null as BonusRoundEndResult | null,
 };
 
 export const useGameStore = create<GameStore>((set, get) => ({
@@ -68,6 +93,8 @@ export const useGameStore = create<GameStore>((set, get) => ({
   setLastResults: (results) => set({ lastResults: results }),
   
   setFinalRankings: (rankings) => set({ finalRankings: rankings }),
+  
+  setBonusRoundResult: (result) => set({ bonusRoundResult: result }),
   
   reset: () => set(initialState),
   

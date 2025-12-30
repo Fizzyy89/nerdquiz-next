@@ -76,6 +76,29 @@ export const MatchingContentSchema = z.object({
     .max(6, 'Maximal 6 Paare'),
 });
 
+/**
+ * Collective List: Bonusrunde - Spieler nennen nacheinander Items aus einer Liste
+ * Beispiel: "Nenne alle US-Bundesstaaten"
+ */
+export const CollectiveListItemSchema = z.object({
+  id: z.string().min(1),
+  display: z.string().min(1), // Anzeigename
+  aliases: z.array(z.string().min(1)).min(1), // Akzeptierte Schreibweisen
+  group: z.string().optional(), // Optionale Gruppierung (z.B. "West", "Ost")
+});
+
+export const CollectiveListContentSchema = z.object({
+  topic: z.string().min(1, 'Thema angeben'), // z.B. "US-Bundesstaaten"
+  description: z.string().optional(), // z.B. "Nenne alle 50 Staaten"
+  items: z
+    .array(CollectiveListItemSchema)
+    .min(5, 'Mindestens 5 Items')
+    .max(500, 'Maximal 500 Items'),
+  timePerTurn: z.number().min(5).max(60).default(15), // Sekunden pro Spielerzug
+  fuzzyThreshold: z.number().min(0.5).max(1).default(0.85), // Mindest-Ähnlichkeit für Fuzzy-Match
+  showGroupHeaders: z.boolean().default(false), // Gruppen im Grid anzeigen
+});
+
 // ============================================
 // TYPE EXPORTS
 // ============================================
@@ -86,6 +109,8 @@ export type TrueFalseContent = z.infer<typeof TrueFalseContentSchema>;
 export type SortingContent = z.infer<typeof SortingContentSchema>;
 export type TextInputContent = z.infer<typeof TextInputContentSchema>;
 export type MatchingContent = z.infer<typeof MatchingContentSchema>;
+export type CollectiveListContent = z.infer<typeof CollectiveListContentSchema>;
+export type CollectiveListItem = z.infer<typeof CollectiveListItemSchema>;
 
 // Union Type
 export type QuestionContent =
@@ -94,7 +119,8 @@ export type QuestionContent =
   | TrueFalseContent
   | SortingContent
   | TextInputContent
-  | MatchingContent;
+  | MatchingContent
+  | CollectiveListContent;
 
 // ============================================
 // VALIDATION HELPERS
@@ -106,7 +132,8 @@ export type QuestionType =
   | 'TRUE_FALSE' 
   | 'SORTING' 
   | 'TEXT_INPUT' 
-  | 'MATCHING';
+  | 'MATCHING'
+  | 'COLLECTIVE_LIST';
 
 const contentSchemaMap: Record<QuestionType, z.ZodSchema> = {
   MULTIPLE_CHOICE: MultipleChoiceContentSchema,
@@ -115,6 +142,7 @@ const contentSchemaMap: Record<QuestionType, z.ZodSchema> = {
   SORTING: SortingContentSchema,
   TEXT_INPUT: TextInputContentSchema,
   MATCHING: MatchingContentSchema,
+  COLLECTIVE_LIST: CollectiveListContentSchema,
 };
 
 /**
@@ -185,6 +213,13 @@ export function isMatchingContent(content: QuestionContent): content is Matching
   return 'pairs' in content;
 }
 
+/**
+ * Type Guard für Collective List (Bonusrunde)
+ */
+export function isCollectiveListContent(content: QuestionContent): content is CollectiveListContent {
+  return 'topic' in content && 'items' in content && Array.isArray((content as any).items);
+}
+
 // ============================================
 // FORM SCHEMAS (für Admin UI)
 // ============================================
@@ -192,7 +227,7 @@ export function isMatchingContent(content: QuestionContent): content is Matching
 export const CreateQuestionSchema = z.object({
   categoryId: z.string().min(1, 'Kategorie auswählen'),
   text: z.string().min(10, 'Frage muss mindestens 10 Zeichen haben'),
-  type: z.enum(['MULTIPLE_CHOICE', 'ESTIMATION', 'TRUE_FALSE', 'SORTING', 'TEXT_INPUT', 'MATCHING']),
+  type: z.enum(['MULTIPLE_CHOICE', 'ESTIMATION', 'TRUE_FALSE', 'SORTING', 'TEXT_INPUT', 'MATCHING', 'COLLECTIVE_LIST']),
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
   content: z.unknown(), // Wird separat validiert basierend auf type
   mediaType: z.enum(['NONE', 'IMAGE', 'AUDIO', 'VIDEO']).default('NONE'),

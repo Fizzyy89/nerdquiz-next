@@ -188,7 +188,7 @@ async function getDbCategoryList(): Promise<CategoryInfo[]> {
   }));
 }
 
-async function getDbRandomQuestions(categorySlug: string, count: number): Promise<GameQuestion[]> {
+async function getDbRandomQuestions(categorySlug: string, count: number, excludeIds: string[] = []): Promise<GameQuestion[]> {
   if (!prisma) return [];
 
   // Find category by slug
@@ -201,12 +201,18 @@ async function getDbRandomQuestions(categorySlug: string, count: number): Promis
     return [];
   }
 
+  // Base filter excluding already used questions
+  const baseFilter = {
+    categoryId: category.id,
+    isActive: true,
+    ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
+  };
+
   // Get questions with random ordering
   // PostgreSQL random ordering
-  const choiceQuestions = await prisma.question.findMany({
+  let choiceQuestions = await prisma.question.findMany({
     where: {
-      categoryId: category.id,
-      isActive: true,
+      ...baseFilter,
       type: { in: ['MULTIPLE_CHOICE', 'TRUE_FALSE'] },
     },
     orderBy: {
@@ -216,14 +222,34 @@ async function getDbRandomQuestions(categorySlug: string, count: number): Promis
     take: count * 2, // Get more than needed for shuffling
   });
 
-  const estimationQuestions = await prisma.question.findMany({
+  let estimationQuestions = await prisma.question.findMany({
     where: {
-      categoryId: category.id,
-      isActive: true,
+      ...baseFilter,
       type: 'ESTIMATION',
     },
     take: 5,
   });
+
+  // If not enough questions and we were excluding, try without exclusion
+  if (choiceQuestions.length < count - 1 && excludeIds.length > 0) {
+    console.log('♻️ Not enough unused questions in category, resetting pool');
+    choiceQuestions = await prisma.question.findMany({
+      where: {
+        categoryId: category.id,
+        isActive: true,
+        type: { in: ['MULTIPLE_CHOICE', 'TRUE_FALSE'] },
+      },
+      take: count * 2,
+    });
+    estimationQuestions = await prisma.question.findMany({
+      where: {
+        categoryId: category.id,
+        isActive: true,
+        type: 'ESTIMATION',
+      },
+      take: 5,
+    });
+  }
 
   // Shuffle in JS
   const shuffledChoice = [...choiceQuestions].sort(() => Math.random() - 0.5);
@@ -330,12 +356,12 @@ export async function getRandomCategoriesForVoting(count: number = 6): Promise<C
 /**
  * Get random questions from a category
  */
-export async function getRandomQuestions(categoryId: string, count: number): Promise<GameQuestion[]> {
+export async function getRandomQuestions(categoryId: string, count: number, excludeIds: string[] = []): Promise<GameQuestion[]> {
   if (prisma) {
     try {
-      const dbQuestions = await getDbRandomQuestions(categoryId, count);
+      const dbQuestions = await getDbRandomQuestions(categoryId, count, excludeIds);
       if (dbQuestions.length > 0) {
-        console.log(`📊 Loaded ${dbQuestions.length} questions from database`);
+        console.log(`📊 Loaded ${dbQuestions.length} questions from database (excluded ${excludeIds.length} used)`);
         return dbQuestions;
       }
     } catch (error) {
@@ -359,6 +385,107 @@ export async function isDatabaseConnected(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+// ============================================
+// BONUS ROUND (COLLECTIVE_LIST) QUESTIONS
+// ============================================
+
+interface BonusRoundQuestion {
+  id: string;
+  topic: string;
+  description?: string;
+  category?: string; // Kategorie-Name (z.B. "Marvel", "Geographie")
+  categoryIcon?: string; // Kategorie-Icon (emoji)
+  questionType: string; // z.B. "Liste", "Sortieren", etc.
+  items: {
+    id: string;
+    display: string;
+    aliases: string[];
+    group?: string;
+  }[];
+  timePerTurn: number;
+  pointsPerCorrect: number;
+  fuzzyThreshold: number;
+}
+
+/**
+ * Get a random COLLECTIVE_LIST question from the database
+ * @param excludeIds - Question IDs to exclude (already used in this session)
+ */
+export async function getRandomBonusRoundQuestion(excludeIds: string[] = []): Promise<BonusRoundQuestion | null> {
+  if (!prisma) {
+    console.warn('⚠️ Database not available for bonus round questions');
+    return null;
+  }
+
+  try {
+    // Get all active COLLECTIVE_LIST questions, excluding already used ones
+    let questions = await prisma.question.findMany({
+      where: {
+        type: 'COLLECTIVE_LIST',
+        isActive: true,
+        ...(excludeIds.length > 0 && { id: { notIn: excludeIds } }),
+      },
+    });
+
+    // If all questions have been used, reset and use all available
+    if (questions.length === 0 && excludeIds.length > 0) {
+      console.log('♻️ All bonus questions used, resetting pool');
+      questions = await prisma.question.findMany({
+        where: {
+          type: 'COLLECTIVE_LIST',
+          isActive: true,
+        },
+      });
+    }
+
+    if (questions.length === 0) {
+      console.warn('⚠️ No COLLECTIVE_LIST questions found in database');
+      return null;
+    }
+
+    // Pick a random one
+    const randomQuestion = questions[Math.floor(Math.random() * questions.length)];
+    const content = randomQuestion.content as any;
+
+    if (!content || !content.items || !Array.isArray(content.items)) {
+      console.warn('⚠️ Invalid COLLECTIVE_LIST content structure');
+      return null;
+    }
+
+    // Load category info if available
+    let categoryName: string | undefined;
+    let categoryIcon: string | undefined;
+    if (randomQuestion.categoryId) {
+      const categoryData = await getCategoryData(randomQuestion.categoryId);
+      if (categoryData) {
+        categoryName = categoryData.name;
+        categoryIcon = categoryData.icon;
+      }
+    }
+
+    return {
+      id: randomQuestion.id,
+      topic: content.topic || randomQuestion.text,
+      description: content.description,
+      category: categoryName,
+      categoryIcon: categoryIcon,
+      questionType: 'Liste', // TODO: Map from QuestionType when we have more bonus round types
+      items: content.items.map((item: any, idx: number) => ({
+        id: item.id || `item-${idx}`,
+        display: item.display,
+        aliases: item.aliases || [item.display],
+        group: item.group,
+      })),
+      timePerTurn: content.timePerTurn || 15,
+      pointsPerCorrect: content.pointsPerCorrect || 200,
+      fuzzyThreshold: content.fuzzyThreshold || 0.85,
+    };
+  } catch (error) {
+    console.error('Error loading bonus round question:', error);
+    return null;
   }
 }
 
