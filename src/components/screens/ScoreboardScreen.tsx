@@ -17,6 +17,7 @@ import { useGameStore, useIsHost, usePlayers } from '@/store/gameStore';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { useMemo } from 'react';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 // Rank colors and styling
 const RANK_CONFIG = [
@@ -139,7 +140,7 @@ export function ScoreboardScreen() {
                     className="absolute -inset-2 rounded-full bg-gradient-to-r from-yellow-500/30 via-amber-500/30 to-yellow-500/30 blur-sm"
                   />
                   <img
-                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(leader.avatarSeed)}&mood=superHappy`}
+                    src={getAvatarUrlFromSeed(leader.avatarSeed, 'superHappy')}
                     alt=""
                     className="relative w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-muted ring-2 ring-yellow-500"
                   />
@@ -213,9 +214,7 @@ export function ScoreboardScreen() {
 
                   {/* Avatar with mood based on rank */}
                   <img
-                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=${
-                      actualRank === 2 ? 'happy' : actualRank === 3 ? 'hopeful' : 'neutral'
-                    }`}
+                    src={getAvatarUrlFromSeed(player.avatarSeed, actualRank === 2 ? 'happy' : actualRank === 3 ? 'hopeful' : 'neutral')}
                     alt=""
                     className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-muted shrink-0"
                   />

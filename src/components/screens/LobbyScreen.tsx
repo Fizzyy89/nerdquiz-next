@@ -29,8 +29,18 @@ import {
   Trophy,
   Settings2,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Pencil,
 } from 'lucide-react';
+import { 
+  AvatarCustomizer, 
+  getAvatarUrlFromSeed, 
+  getSavedAvatarOptions,
+  optionsToSeed,
+  saveAvatarOptions,
+  type DylanAvatarOptions,
+  DEFAULT_AVATAR_OPTIONS,
+} from '@/components/game/AvatarCustomizer';
 
 // Animated Avatar Component with idle animations
 function AnimatedAvatar({ 
@@ -39,12 +49,14 @@ function AnimatedAvatar({
   isCurrentPlayer,
   isHost,
   onReroll,
+  onEdit,
 }: { 
   seed: string; 
   index: number;
   isCurrentPlayer: boolean;
   isHost: boolean;
   onReroll?: () => void;
+  onEdit?: () => void;
 }) {
   // Random but consistent animation parameters per avatar
   const animParams = useMemo(() => ({
@@ -54,6 +66,9 @@ function AnimatedAvatar({
   }), [index]);
 
   const [isRerolling, setIsRerolling] = useState(false);
+  
+  // Use the new avatar URL function that supports both old seeds and new options
+  const avatarUrl = useMemo(() => getAvatarUrlFromSeed(seed), [seed]);
 
   const handleReroll = () => {
     if (!onReroll || isRerolling) return;
@@ -111,7 +126,7 @@ function AnimatedAvatar({
           {/* The actual avatar image */}
           <motion.img
             key={seed} // Re-render on seed change for animation
-            src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(seed)}&mood=happy`}
+            src={avatarUrl}
             alt=""
             className="w-16 h-16 rounded-xl bg-muted relative z-10"
             initial={isRerolling ? { scale: 0.8, opacity: 0 } : false}
@@ -121,25 +136,45 @@ function AnimatedAvatar({
         </motion.div>
       </motion.div>
 
-      {/* Reroll button - only for current player */}
-      {isCurrentPlayer && onReroll && (
-        <motion.button
+      {/* Action buttons - visible for current player */}
+      {isCurrentPlayer && (
+        <motion.div 
+          className="absolute -bottom-0.5 -right-0.5 flex gap-0.5 z-30"
           initial={{ opacity: 0, scale: 0 }}
           animate={{ opacity: 1, scale: 1 }}
-          whileHover={{ scale: 1.1 }}
-          whileTap={{ scale: 0.9 }}
-          onClick={handleReroll}
-          disabled={isRerolling}
-          className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-lg z-30 opacity-0 group-hover:opacity-100 transition-opacity"
-          title="Neuer Avatar"
+          transition={{ delay: 0.3 }}
         >
-          <motion.div
-            animate={isRerolling ? { rotate: 360 } : {}}
-            transition={{ duration: 0.5, ease: 'linear' }}
-          >
-            <Dices className="w-3.5 h-3.5" />
-          </motion.div>
-        </motion.button>
+          {/* Edit button */}
+          {onEdit && (
+            <motion.button
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.85 }}
+              onClick={onEdit}
+              className="w-5 h-5 rounded-full bg-secondary text-secondary-foreground flex items-center justify-center shadow-md hover:shadow-lg transition-shadow"
+              title="Avatar anpassen"
+            >
+              <Pencil className="w-2.5 h-2.5" />
+            </motion.button>
+          )}
+          {/* Reroll button */}
+          {onReroll && (
+            <motion.button
+              whileHover={{ scale: 1.15 }}
+              whileTap={{ scale: 0.85 }}
+              onClick={handleReroll}
+              disabled={isRerolling}
+              className="w-5 h-5 rounded-full bg-primary text-primary-foreground flex items-center justify-center shadow-md hover:shadow-lg transition-shadow disabled:opacity-50"
+              title="Zufälliger Avatar"
+            >
+              <motion.div
+                animate={isRerolling ? { rotate: 360 } : {}}
+                transition={{ duration: 0.5, ease: 'linear' }}
+              >
+                <Dices className="w-2.5 h-2.5" />
+              </motion.div>
+            </motion.button>
+          )}
+        </motion.div>
       )}
 
       {/* Floating particles for host */}
@@ -491,7 +526,7 @@ function GameSummary({
 
 export function LobbyScreen() {
   const router = useRouter();
-  const { startGame, updateSettings, leaveGame, rerollAvatar } = useSocket();
+  const { startGame, updateSettings, leaveGame, rerollAvatar, updateAvatar } = useSocket();
   const room = useGameStore((s) => s.room);
   const playerId = useGameStore((s) => s.playerId);
   const isHost = useIsHost();
@@ -503,6 +538,20 @@ export function LobbyScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [devModeActivated, setDevModeActivated] = useState(false);
+  const [showAvatarCustomizer, setShowAvatarCustomizer] = useState(false);
+  
+  // Handler for randomizing avatar - generates new random options and saves them
+  const handleRandomizeAvatar = useCallback(() => {
+    const randomOptions: DylanAvatarOptions = {
+      hair: ['bangs', 'buns', 'flatTop', 'fluffy', 'longCurls', 'parting', 'plain', 'roundBob', 'shaggy', 'shortCurls', 'spiky', 'wavy'][Math.floor(Math.random() * 12)],
+      hairColor: ['000000', '3d2314', '7b4b2a', 'a67c52', 'daa520', 'f0e68c', 'b22222', 'cd7f32', 'ff6347', 'ff69b4', 'ff1493', '9370db', '8b00ff', '4169e1', '40e0d0', '228b22', '32cd32', '808080', 'c0c0c0', 'f5f5f5'][Math.floor(Math.random() * 20)],
+      skinColor: ['fce4d6', 'ffd6c0', 'e8c4a0', 'c9a06b', 'c26450', 'a67c52', '8d5524', '614335', '3a2a1d'][Math.floor(Math.random() * 9)],
+      backgroundColor: ['transparent', 'ffffff', 'f0f0f0', 'd3d3d3', 'ff7f7f', 'ffdab9', 'ffd700', 'fff500', '98fb98', 'b6e3f4', '40e0d0', '87ceeb', 'add8e6', 'e6e6fa', 'c0aede', 'dda0dd', 'ffb6c1', 'ffd5dc', 'ffdfbf'][Math.floor(Math.random() * 19)],
+      facialHair: Math.random() > 0.7 ? 'default' : '',
+    };
+    saveAvatarOptions(randomOptions);
+    updateAvatar(optionsToSeed(randomOptions));
+  }, [updateAvatar]);
   
   // Secret code listener for dev mode activation
   const typedCharsRef = useRef('');
@@ -778,7 +827,8 @@ export function LobbyScreen() {
                   index={i}
                   isCurrentPlayer={player.id === playerId}
                   isHost={player.isHost}
-                  onReroll={player.id === playerId ? rerollAvatar : undefined}
+                  onReroll={player.id === playerId ? handleRandomizeAvatar : undefined}
+                  onEdit={player.id === playerId ? () => setShowAvatarCustomizer(true) : undefined}
                 />
 
                 <p className="font-bold truncate">{player.name}</p>
@@ -1113,6 +1163,16 @@ export function LobbyScreen() {
           Spiel verlassen
         </Button>
       </motion.div>
+
+      {/* Avatar Customizer Modal/Drawer */}
+      <AvatarCustomizer
+        open={showAvatarCustomizer}
+        onOpenChange={setShowAvatarCustomizer}
+        onSave={(options: DylanAvatarOptions) => {
+          // Send the options as JSON string to the server
+          updateAvatar(optionsToSeed(options));
+        }}
+      />
     </motion.div>
   );
 }

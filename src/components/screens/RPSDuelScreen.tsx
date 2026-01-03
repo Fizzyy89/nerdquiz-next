@@ -6,6 +6,7 @@ import { Swords, Crown, Clock, Check, Sparkles } from 'lucide-react';
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import type { RPSChoice } from '@/types/game';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 // RPS Icons and colors
 const RPS_CONFIG: Record<RPSChoice, { emoji: string; name: string; color: string; beats: RPSChoice }> = {
@@ -241,7 +242,7 @@ export function RPSDuelScreen() {
           
           <div className="flex items-center justify-center gap-3 mb-6">
             <img
-              src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(winner?.avatarSeed || '')}&mood=superHappy`}
+              src={getAvatarUrlFromSeed(winner?.avatarSeed || '', 'superHappy')}
               alt=""
               className="w-10 h-10 rounded-full bg-muted border-2 border-red-500"
             />
@@ -552,7 +553,7 @@ function PlayerCard({
       {/* Avatar */}
       <div className="relative">
         <img
-          src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=${isWinner ? 'superHappy' : 'hopeful'}`}
+          src={getAvatarUrlFromSeed(player.avatarSeed, isWinner ? 'superHappy' : 'hopeful')}
           alt=""
           className={`w-20 h-20 md:w-24 md:h-24 rounded-full bg-muted border-4 ${
             isWinner ? 'border-red-500 shadow-lg shadow-red-500/30' : 'border-white/20'

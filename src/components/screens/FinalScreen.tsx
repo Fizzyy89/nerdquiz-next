@@ -24,6 +24,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 export function FinalScreen() {
   const router = useRouter();
@@ -165,7 +166,7 @@ export function FinalScreen() {
           >
             <div className="relative">
               <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(winner.avatarSeed)}&mood=superHappy`}
+                src={getAvatarUrlFromSeed(winner.avatarSeed, 'superHappy')}
                 alt=""
                 className="w-12 h-12 sm:w-14 sm:h-14 rounded-xl bg-muted border-2 border-yellow-500"
               />
@@ -196,7 +197,7 @@ export function FinalScreen() {
               className="flex flex-col items-center"
             >
               <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(podium[1].avatarSeed)}&mood=happy`}
+                src={getAvatarUrlFromSeed(podium[1].avatarSeed, 'happy')}
                 alt=""
                 className="w-11 h-11 sm:w-12 sm:h-12 rounded-lg bg-muted mb-1 ring-2 ring-slate-400"
               />
@@ -218,7 +219,7 @@ export function FinalScreen() {
             >
               <Sparkles className="w-4 h-4 text-yellow-500 mb-0.5 animate-pulse" />
               <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(podium[0].avatarSeed)}&mood=superHappy`}
+                src={getAvatarUrlFromSeed(podium[0].avatarSeed, 'superHappy')}
                 alt=""
                 className="w-12 h-12 sm:w-14 sm:h-14 rounded-lg bg-muted mb-1 ring-2 ring-yellow-500"
               />
@@ -239,7 +240,7 @@ export function FinalScreen() {
               className="flex flex-col items-center"
             >
               <img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(podium[2].avatarSeed)}&mood=hopeful`}
+                src={getAvatarUrlFromSeed(podium[2].avatarSeed, 'hopeful')}
                 alt=""
                 className="w-10 h-10 sm:w-11 sm:h-11 rounded-lg bg-muted mb-1 ring-2 ring-amber-700"
               />
@@ -272,7 +273,7 @@ export function FinalScreen() {
                   {index + 4}
                 </div>
                 <img
-                  src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=neutral`}
+                  src={getAvatarUrlFromSeed(player.avatarSeed, 'neutral')}
                   alt=""
                   className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg bg-muted"
                 />
@@ -313,7 +314,7 @@ export function FinalScreen() {
                         <div key={player.playerId} className="flex items-center gap-2">
                           <span className="text-xs font-bold text-green-500 w-3">{index + 1}.</span>
                           <img
-                            src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=neutral`}
+                            src={getAvatarUrlFromSeed(player.avatarSeed, 'neutral')}
                             alt=""
                             className="w-5 h-5 rounded-full bg-muted"
                           />
@@ -345,7 +346,7 @@ export function FinalScreen() {
                   {gameStatistics.bestEstimator ? (
                     <div className="flex items-center gap-2">
                       <img
-                        src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(gameStatistics.bestEstimator.avatarSeed)}&mood=superHappy`}
+                        src={getAvatarUrlFromSeed(gameStatistics.bestEstimator.avatarSeed, 'superHappy')}
                         alt=""
                         className="w-8 h-8 rounded-full bg-muted border-2 border-purple-500"
                       />

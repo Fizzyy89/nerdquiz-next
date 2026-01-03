@@ -82,6 +82,9 @@ export function setupSocketHandlers(io: SocketServer): void {
     // === REROLL AVATAR ===
     socket.on('reroll_avatar', handleRerollAvatar(io));
 
+    // === UPDATE AVATAR (custom options) ===
+    socket.on('update_avatar', handleUpdateAvatar(io));
+
     // === START GAME ===
     socket.on('start_game', handleStartGame(io));
 
@@ -135,15 +138,18 @@ export function setupSocketHandlers(io: SocketServer): void {
 // ============================================
 
 function handleCreateRoom(socket: Socket) {
-  return (data: { playerName: string }, callback: (response: any) => void) => {
+  return (data: { playerName: string; avatarOptions?: string }, callback: (response: any) => void) => {
     const roomCode = generateRoomCode();
     const playerId = generatePlayerId();
+    
+    // Use custom avatar options if provided, otherwise generate random seed
+    const avatarSeed = data.avatarOptions || (data.playerName + Date.now());
     
     const player: Player = {
       id: playerId,
       socketId: socket.id,
       name: data.playerName.trim(),
-      avatarSeed: data.playerName + Date.now(),
+      avatarSeed,
       score: 0,
       isHost: true,
       isConnected: true,
@@ -177,7 +183,7 @@ function handleCreateRoom(socket: Socket) {
 }
 
 function handleJoinRoom(socket: Socket, io: SocketServer) {
-  return (data: { roomCode: string; playerName: string }, callback: (response: any) => void) => {
+  return (data: { roomCode: string; playerName: string; avatarOptions?: string }, callback: (response: any) => void) => {
     const code = data.roomCode.toUpperCase();
     const room = getRoom(code);
     
@@ -204,12 +210,15 @@ function handleJoinRoom(socket: Socket, io: SocketServer) {
       return;
     }
 
+    // Use custom avatar options if provided, otherwise generate random seed
+    const avatarSeed = data.avatarOptions || (data.playerName + Date.now());
+
     const playerId = generatePlayerId();
     const player: Player = {
       id: playerId,
       socketId: socket.id,
       name: data.playerName.trim(),
-      avatarSeed: data.playerName + Date.now(),
+      avatarSeed,
       score: 0,
       isHost: false,
       isConnected: true,
@@ -259,6 +268,22 @@ function handleRerollAvatar(io: SocketServer) {
     
     player.avatarSeed = player.name + Date.now() + Math.random().toString(36).slice(2);
     console.log(`🎲 ${player.name} rerolled avatar`);
+    broadcastRoomUpdate(room, io);
+  };
+}
+
+function handleUpdateAvatar(io: SocketServer) {
+  return (data: { roomCode: string; playerId: string; avatarOptions: string }) => {
+    const room = getRoom(data.roomCode);
+    if (!room || room.state.phase !== 'lobby') return;
+    
+    const player = room.players.get(data.playerId);
+    if (!player) return;
+    
+    // Store the JSON string of options as the avatarSeed
+    // This allows the client to parse it back to options
+    player.avatarSeed = data.avatarOptions;
+    console.log(`🎨 ${player.name} updated avatar`);
     broadcastRoomUpdate(room, io);
   };
 }

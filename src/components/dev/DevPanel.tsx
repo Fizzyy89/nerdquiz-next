@@ -22,6 +22,7 @@ import {
 import { getSocket } from '@/lib/socket';
 import { useGameStore } from '@/store/gameStore';
 import { useDevMode } from '@/hooks/useDevMode';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 // Category type for endless mode
 interface DevCategory {
@@ -278,7 +279,7 @@ export function DevPanel() {
                             }`}
                           >
                             <img
-                              src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(p.avatarSeed)}&mood=neutral`}
+                              src={getAvatarUrlFromSeed(p.avatarSeed, 'neutral')}
                               alt=""
                               className="w-6 h-6 rounded-full"
                             />

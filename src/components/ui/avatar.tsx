@@ -1,6 +1,7 @@
 'use client';
 
 import { cn } from '@/lib/utils';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 export type AvatarMood = 'angry' | 'confused' | 'happy' | 'hopeful' | 'neutral' | 'sad' | 'superHappy';
 
@@ -23,6 +24,7 @@ const sizeClasses = {
 
 /**
  * Game Avatar Component using DiceBear Dylan style
+ * Supports both old seed-based avatars and new custom avatar options (stored as JSON in seed)
  * @see https://www.dicebear.com/styles/dylan/
  */
 export function GameAvatar({ 
@@ -32,7 +34,8 @@ export function GameAvatar({
   className,
   alt = '',
 }: GameAvatarProps) {
-  const url = `https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(seed)}&mood=${mood}`;
+  // Use the new URL generator that handles both old seeds and new options
+  const url = getAvatarUrlFromSeed(seed, mood);
   
   return (
     <img

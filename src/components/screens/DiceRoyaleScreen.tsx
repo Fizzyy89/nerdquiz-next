@@ -6,6 +6,7 @@ import { Dices, Crown, Clock, Check, RefreshCw, Sparkles, X } from 'lucide-react
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import { cn } from '@/lib/utils';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 interface PlayerRollData {
   playerId: string;
@@ -206,7 +207,7 @@ function PlayerCard({
 
       {/* Avatar */}
       <img
-        src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=${isWinner ? 'superHappy' : player.isEliminated ? 'sad' : hasRolledDice ? 'hopeful' : 'neutral'}`}
+        src={getAvatarUrlFromSeed(player.avatarSeed, isWinner ? 'superHappy' : player.isEliminated ? 'sad' : hasRolledDice ? 'hopeful' : 'neutral')}
         alt=""
         className={cn(
           "w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-muted mb-2",
@@ -490,7 +491,7 @@ export function DiceRoyaleScreen() {
           
           <div className="flex items-center justify-center gap-3 mb-6">
             <img
-              src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(winner?.avatarSeed || '')}&mood=superHappy`}
+              src={getAvatarUrlFromSeed(winner?.avatarSeed || '', 'superHappy')}
               alt=""
               className="w-10 h-10 rounded-full bg-muted border-2 border-emerald-500"
             />
@@ -639,7 +640,7 @@ export function DiceRoyaleScreen() {
                   className="flex items-center gap-1 px-2 py-1 rounded-full bg-muted/50 text-muted-foreground text-xs"
                 >
                   <img
-                    src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=sad`}
+                    src={getAvatarUrlFromSeed(player.avatarSeed, 'sad')}
                     alt=""
                     className="w-5 h-5 rounded-full bg-muted grayscale"
                   />

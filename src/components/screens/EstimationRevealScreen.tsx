@@ -8,6 +8,7 @@ import { useGameStore, useIsHost, useMyResult } from '@/store/gameStore';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 // Lustige Sprüche basierend auf Abweichung (Prozent vom korrekten Wert)
 const getQuip = (diffPercent: number, isExact: boolean): { text: string; emoji: string } => {
@@ -239,7 +240,7 @@ export function EstimationRevealScreen() {
 
                       {/* Avatar */}
                       <img
-                        src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(result.avatarSeed)}&mood=${result.absDiff === 0 ? 'superHappy' : diffPercent <= 20 ? 'happy' : diffPercent <= 50 ? 'confused' : 'sad'}`}
+                        src={getAvatarUrlFromSeed(result.avatarSeed, result.absDiff === 0 ? 'superHappy' : diffPercent <= 20 ? 'happy' : diffPercent <= 50 ? 'confused' : 'sad')}
                         alt=""
                         className="w-12 h-12 rounded-full bg-muted shrink-0"
                       />

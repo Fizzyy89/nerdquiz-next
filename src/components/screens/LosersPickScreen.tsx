@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Crown, Clock, Sparkles, Check } from 'lucide-react';
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 interface CategorySelectedData {
   categoryId: string;
@@ -99,7 +100,7 @@ export function LosersPickScreen() {
             className="flex items-center justify-center gap-3 mb-6"
           >
             <img
-              src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(loserPlayer?.avatarSeed || '')}&mood=happy`}
+              src={getAvatarUrlFromSeed(loserPlayer?.avatarSeed || '', 'happy')}
               alt=""
               className="w-12 h-12 rounded-full bg-muted border-2 border-amber-500"
             />
@@ -216,7 +217,7 @@ export function LosersPickScreen() {
             </h1>
             <div className="inline-flex items-center gap-4 px-6 py-4 rounded-2xl glass">
               <motion.img
-                src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(loserPlayer?.avatarSeed || '')}&mood=hopeful`}
+                src={getAvatarUrlFromSeed(loserPlayer?.avatarSeed || '', 'hopeful')}
                 alt=""
                 className="w-16 h-16 rounded-full bg-muted"
                 animate={{ 

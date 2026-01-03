@@ -5,6 +5,7 @@ import { useGameStore, type BonusRoundEndResult } from '@/store/gameStore';
 import type { RoomState, AnswerResult, FinalRanking, GameStatistics } from '@/types/game';
 import { getSocket } from '@/lib/socket';
 import { saveSession, clearSession } from '@/lib/session';
+import { getSavedAvatarOptions, optionsToSeed } from '@/components/game/AvatarCustomizer';
 
 export function useSocket() {
   const {
@@ -143,7 +144,12 @@ export function useSocket() {
   const createRoom = useCallback((playerName: string): Promise<{ success: boolean; roomCode?: string; error?: string }> => {
     return new Promise((resolve) => {
       const socket = getSocket();
-      socket.emit('create_room', { playerName }, (response: any) => {
+      
+      // Get saved avatar options from localStorage
+      const savedOptions = getSavedAvatarOptions();
+      const avatarOptions = savedOptions ? optionsToSeed(savedOptions) : undefined;
+      
+      socket.emit('create_room', { playerName, avatarOptions }, (response: any) => {
         if (response.success) {
           setPlayer(response.playerId, response.roomCode);
           setRoom(response.room);
@@ -162,7 +168,12 @@ export function useSocket() {
   const joinRoom = useCallback((roomCode: string, playerName: string): Promise<{ success: boolean; error?: string }> => {
     return new Promise((resolve) => {
       const socket = getSocket();
-      socket.emit('join_room', { roomCode, playerName }, (response: any) => {
+      
+      // Get saved avatar options from localStorage
+      const savedOptions = getSavedAvatarOptions();
+      const avatarOptions = savedOptions ? optionsToSeed(savedOptions) : undefined;
+      
+      socket.emit('join_room', { roomCode, playerName, avatarOptions }, (response: any) => {
         if (response.success) {
           setPlayer(response.playerId, response.roomCode);
           setRoom(response.room);
@@ -268,6 +279,13 @@ export function useSocket() {
     socket.emit('reroll_avatar', { roomCode, playerId });
   }, []);
 
+  const updateAvatar = useCallback((avatarOptions: string) => {
+    const socket = getSocket();
+    const { playerId, roomCode } = useGameStore.getState();
+    if (!roomCode || !playerId) return;
+    socket.emit('update_avatar', { roomCode, playerId, avatarOptions });
+  }, []);
+
   const submitBonusRoundAnswer = useCallback((answer: string) => {
     const socket = getSocket();
     const { playerId, roomCode } = useGameStore.getState();
@@ -302,6 +320,7 @@ export function useSocket() {
     next,
     leaveGame,
     rerollAvatar,
+    updateAvatar,
     submitBonusRoundAnswer,
     skipBonusRound,
     voteRematch,

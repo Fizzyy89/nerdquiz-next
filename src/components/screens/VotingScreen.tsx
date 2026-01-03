@@ -6,6 +6,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import { Clock, Check, Sparkles } from 'lucide-react';
+import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
 
 interface CategoryPosition {
   id: string;
@@ -324,7 +325,7 @@ export function VotingScreen() {
                         }}
                       >
                         <img
-                          src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=hopeful`}
+                          src={getAvatarUrlFromSeed(player.avatarSeed, 'hopeful')}
                           alt={player.name}
                           className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-muted border-2 border-primary shadow-lg"
                         />
@@ -440,7 +441,7 @@ function WuselingAvatar({
         }}
       >
         <motion.img
-          src={`https://api.dicebear.com/9.x/dylan/svg?seed=${encodeURIComponent(player.avatarSeed)}&mood=neutral`}
+          src={getAvatarUrlFromSeed(player.avatarSeed, 'neutral')}
           alt={player.name}
           className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-muted/80 border-2 border-white/30 shadow-lg cursor-default"
           whileHover={{ scale: 1.1 }}
