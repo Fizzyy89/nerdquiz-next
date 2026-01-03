@@ -12,6 +12,7 @@ import type { Server as SocketServer } from 'socket.io';
 import type { GameRoom, AnswerResult, PlayerGameStats } from '../types';
 import { createInitialPlayerStats } from '../types';
 import { 
+  getRoom,
   resetPlayerAnswers,
   roomToClient,
   emitPhaseChange,
@@ -106,11 +107,16 @@ export async function startQuestion(room: GameRoom, io: SocketServer): Promise<v
   broadcastRoomUpdate(room, io);
 
   // Set timeout for auto-reveal
+  const roomCode = room.code;
+  const questionIndex = room.state.currentQuestionIndex; // Capture for validation
   room.questionTimer = setTimeout(() => {
-    if (room.state.phase === 'question') {
-      showAnswer(room, io);
-    } else if (room.state.phase === 'estimation') {
-      showEstimationAnswer(room, io);
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom || currentRoom.state.currentQuestionIndex !== questionIndex) return;
+    
+    if (currentRoom.state.phase === 'question') {
+      showAnswer(currentRoom, io);
+    } else if (currentRoom.state.phase === 'estimation') {
+      showEstimationAnswer(currentRoom, io);
     }
   }, room.settings.timePerQuestion * 1000);
 }

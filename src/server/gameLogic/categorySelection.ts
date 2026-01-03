@@ -119,6 +119,7 @@ export function selectCategoryMode(room: GameRoom): CategorySelectionMode {
  * Startet die Kategorie-Abstimmung
  */
 export function startCategoryVoting(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture room code for timer
   room.state.phase = 'category_voting';
   room.state.timerEnd = Date.now() + 15000;
 
@@ -126,16 +127,26 @@ export function startCategoryVoting(room: GameRoom, io: SocketServer): void {
   broadcastRoomUpdate(room, io);
 
   setTimeout(() => {
-    if (room.state.phase === 'category_voting') {
-      finalizeCategoryVoting(room, io);
+    // Re-fetch room to ensure we have current state
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_voting') {
+      finalizeCategoryVoting(currentRoom, io);
     }
   }, 15000);
 }
 
 /**
  * Finalisiert die Kategorie-Abstimmung
+ * Guard gegen mehrfachen Aufruf durch Phase-Check am Anfang
  */
 export async function finalizeCategoryVoting(room: GameRoom, io: SocketServer): Promise<void> {
+  // Guard: Nur einmal ausführen - sofort Phase wechseln
+  if (room.state.phase !== 'category_voting') {
+    console.log(`⚠️ finalizeCategoryVoting called but phase is ${room.state.phase}, skipping`);
+    return;
+  }
+  room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
+  
   const voteCounts = new Map<string, number>();
   room.state.categoryVotes.forEach((catId) => {
     voteCounts.set(catId, (voteCounts.get(catId) || 0) + 1);
@@ -174,37 +185,45 @@ export async function finalizeCategoryVoting(room: GameRoom, io: SocketServer): 
       }).filter(Boolean)
     : [];
 
+  const roomCode = room.code;
+  
   if (isTie) {
     console.log(`🎰 Voting tie between ${winners.length} categories, starting roulette...`);
-    io.to(room.code).emit('voting_tiebreaker', {
+    io.to(roomCode).emit('voting_tiebreaker', {
       tiedCategories,
       winnerId: selectedCategoryId,
     });
     
     // Wait for roulette animation, then send category_selected
     setTimeout(() => {
-      io.to(room.code).emit('category_selected', { 
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom) return;
+      
+      io.to(roomCode).emit('category_selected', { 
         categoryId: selectedCategoryId,
         categoryName: categoryData?.name,
         categoryIcon: categoryData?.icon,
       });
 
       setTimeout(() => {
-        // Import dynamically to avoid circular dependency
+        const innerRoom = getRoom(roomCode);
+        if (!innerRoom) return;
         const { startQuestion } = require('./questions');
-        startQuestion(room, io);
+        startQuestion(innerRoom, io);
       }, 2500);
     }, 3000);
   } else {
-    io.to(room.code).emit('category_selected', { 
+    io.to(roomCode).emit('category_selected', { 
       categoryId: selectedCategoryId,
       categoryName: categoryData?.name,
       categoryIcon: categoryData?.icon,
     });
 
     setTimeout(() => {
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom) return;
       const { startQuestion } = require('./questions');
-      startQuestion(room, io);
+      startQuestion(currentRoom, io);
     }, 2500);
   }
 }
@@ -217,6 +236,7 @@ export async function finalizeCategoryVoting(room: GameRoom, io: SocketServer): 
  * Startet das Glücksrad
  */
 export function startCategoryWheel(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   room.state.phase = 'category_wheel';
   
   // The wheel shows max 8 categories
@@ -226,6 +246,7 @@ export function startCategoryWheel(room: GameRoom, io: SocketServer): void {
   // Pre-select a random category
   const selectedIndex = Math.floor(Math.random() * wheelCategories.length);
   const selectedCat = wheelCategories[selectedIndex];
+  const selectedCatId = selectedCat.id; // Capture for timer
   
   room.state.wheelSelectedIndex = selectedIndex;
   
@@ -236,8 +257,9 @@ export function startCategoryWheel(room: GameRoom, io: SocketServer): void {
 
   // Wheel animation takes ~5 seconds
   setTimeout(() => {
-    if (room.state.phase === 'category_wheel') {
-      finalizeWheelSelection(room, io, selectedCat.id);
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_wheel') {
+      finalizeWheelSelection(currentRoom, io, selectedCatId);
     }
   }, 5500);
 }
@@ -246,6 +268,14 @@ export function startCategoryWheel(room: GameRoom, io: SocketServer): void {
  * Finalisiert die Glücksrad-Auswahl
  */
 export async function finalizeWheelSelection(room: GameRoom, io: SocketServer, categoryId: string): Promise<void> {
+  // Guard: Nur einmal ausführen
+  if (room.state.phase !== 'category_wheel') {
+    console.log(`⚠️ finalizeWheelSelection called but phase is ${room.state.phase}, skipping`);
+    return;
+  }
+  room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
+  
+  const roomCode = room.code;
   room.state.selectedCategory = categoryId;
   room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
   room.state.currentQuestionIndex = 0;
@@ -253,15 +283,17 @@ export async function finalizeWheelSelection(room: GameRoom, io: SocketServer, c
 
   const categoryData = await getCategoryData(categoryId);
   
-  io.to(room.code).emit('category_selected', { 
+  io.to(roomCode).emit('category_selected', { 
     categoryId,
     categoryName: categoryData?.name,
     categoryIcon: categoryData?.icon,
   });
 
   setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
     const { startQuestion } = require('./questions');
-    startQuestion(room, io);
+    startQuestion(currentRoom, io);
   }, 2000);
 }
 
@@ -273,6 +305,7 @@ export async function finalizeWheelSelection(room: GameRoom, io: SocketServer, c
  * Startet Loser's Pick
  */
 export function startLosersPick(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   room.state.phase = 'category_losers_pick';
   room.state.timerEnd = Date.now() + 15000;
 
@@ -281,11 +314,12 @@ export function startLosersPick(room: GameRoom, io: SocketServer): void {
 
   // Timeout fallback - random selection if loser doesn't pick
   setTimeout(() => {
-    if (room.state.phase === 'category_losers_pick') {
-      const randomCat = room.state.votingCategories[
-        Math.floor(Math.random() * room.state.votingCategories.length)
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_losers_pick') {
+      const randomCat = currentRoom.state.votingCategories[
+        Math.floor(Math.random() * currentRoom.state.votingCategories.length)
       ];
-      finalizeLosersPick(room, io, randomCat.id);
+      finalizeLosersPick(currentRoom, io, randomCat.id);
     }
   }, 15000);
 }
@@ -294,13 +328,21 @@ export function startLosersPick(room: GameRoom, io: SocketServer): void {
  * Finalisiert die Loser's Pick Auswahl
  */
 export async function finalizeLosersPick(room: GameRoom, io: SocketServer, categoryId: string): Promise<void> {
+  // Guard: Nur einmal ausführen
+  if (room.state.phase !== 'category_losers_pick') {
+    console.log(`⚠️ finalizeLosersPick called but phase is ${room.state.phase}, skipping`);
+    return;
+  }
+  room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
+  
   room.state.selectedCategory = categoryId;
   room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
   room.state.currentQuestionIndex = 0;
 
   const categoryData = await getCategoryData(categoryId);
   
-  io.to(room.code).emit('category_selected', { 
+  const roomCode = room.code;
+  io.to(roomCode).emit('category_selected', { 
     categoryId,
     categoryName: categoryData?.name,
     categoryIcon: categoryData?.icon,
@@ -308,8 +350,10 @@ export async function finalizeLosersPick(room: GameRoom, io: SocketServer, categ
   });
 
   setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
     const { startQuestion } = require('./questions');
-    startQuestion(room, io);
+    startQuestion(currentRoom, io);
   }, 2500);
 }
 
@@ -321,6 +365,7 @@ export async function finalizeLosersPick(room: GameRoom, io: SocketServer, categ
  * Startet Dice Royale - alle Spieler würfeln
  */
 export function startDiceRoyale(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timers
   room.state.phase = 'category_dice_royale';
   
   const connectedPlayers = getConnectedPlayers(room);
@@ -344,20 +389,23 @@ export function startDiceRoyale(room: GameRoom, io: SocketServer): void {
 
   // Send start event after small delay
   setTimeout(() => {
-    io.to(room.code).emit('dice_royale_start', {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
+    io.to(roomCode).emit('dice_royale_start', {
       players: connectedPlayers.map(p => ({
         id: p.id,
         name: p.name,
         avatarSeed: p.avatarSeed,
       })),
     });
-    io.to(room.code).emit('dice_royale_ready');
+    io.to(roomCode).emit('dice_royale_ready');
   }, 500);
 
   // Timeout - auto-roll for players who haven't rolled
   setTimeout(() => {
-    if (room.state.phase === 'category_dice_royale' && room.state.diceRoyale?.phase === 'rolling') {
-      autoRollRemainingPlayers(room, io);
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_dice_royale' && currentRoom.state.diceRoyale?.phase === 'rolling') {
+      autoRollRemainingPlayers(currentRoom, io);
     }
   }, 15500);
 }
@@ -366,6 +414,7 @@ export function startDiceRoyale(room: GameRoom, io: SocketServer): void {
  * Auto-Roll für Spieler die nicht gewürfelt haben
  */
 export function autoRollRemainingPlayers(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code;
   const royale = room.state.diceRoyale;
   if (!royale) return;
 
@@ -373,14 +422,19 @@ export function autoRollRemainingPlayers(room: GameRoom, io: SocketServer): void
     if (rolls === null) {
       const autoRolls = [rollDie(), rollDie()];
       royale.playerRolls.set(playerId, autoRolls);
-      io.to(room.code).emit('dice_royale_roll', {
+      io.to(roomCode).emit('dice_royale_roll', {
         playerId,
         rolls: autoRolls,
       });
     }
   });
 
-  setTimeout(() => checkDiceRoyaleResult(room, io), 500);
+  setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom) {
+      checkDiceRoyaleResult(currentRoom, io);
+    }
+  }, 500);
 }
 
 /**
@@ -424,22 +478,28 @@ export function checkDiceRoyaleResult(room: GameRoom, io: SocketServer): void {
     broadcastRoomUpdate(room, io);
 
     // Reset rolls only for tied players
+    const roomCode = room.code;
+    const tiedIds = royale.tiedPlayerIds;
     setTimeout(() => {
-      if (royale.tiedPlayerIds) {
-        royale.tiedPlayerIds.forEach(playerId => {
-          royale.playerRolls.set(playerId, null);
-        });
-        royale.phase = 'rolling';
-        io.to(room.code).emit('dice_royale_ready');
-        broadcastRoomUpdate(room, io);
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_dice_royale') return;
+      const currentRoyale = currentRoom.state.diceRoyale;
+      if (!currentRoyale || !tiedIds) return;
+      
+      tiedIds.forEach(playerId => {
+        currentRoyale.playerRolls.set(playerId, null);
+      });
+      currentRoyale.phase = 'rolling';
+      io.to(roomCode).emit('dice_royale_ready');
+      broadcastRoomUpdate(currentRoom, io);
 
-        // Timeout for re-roll
-        setTimeout(() => {
-          if (room.state.phase === 'category_dice_royale' && royale.phase === 'rolling') {
-            autoRollRemainingPlayers(room, io);
-          }
-        }, 10000);
-      }
+      // Timeout for re-roll
+      setTimeout(() => {
+        const innerRoom = getRoom(roomCode);
+        if (innerRoom && innerRoom.state.phase === 'category_dice_royale' && innerRoom.state.diceRoyale?.phase === 'rolling') {
+          autoRollRemainingPlayers(innerRoom, io);
+        }
+      }, 10000);
     }, 2500);
     return;
   }
@@ -472,9 +532,11 @@ export function checkDiceRoyaleResult(room: GameRoom, io: SocketServer): void {
   broadcastRoomUpdate(room, io);
 
   // After showing winner, let them pick
+  const roomCodeForPick = room.code;
   setTimeout(() => {
-    if (room.state.phase === 'category_dice_royale') {
-      startDiceRoyalePick(room, io);
+    const currentRoom = getRoom(roomCodeForPick);
+    if (currentRoom && currentRoom.state.phase === 'category_dice_royale') {
+      startDiceRoyalePick(currentRoom, io);
     }
   }, 3000);
 }
@@ -483,17 +545,19 @@ export function checkDiceRoyaleResult(room: GameRoom, io: SocketServer): void {
  * Startet die Kategorie-Auswahl für den Dice Royale Gewinner
  */
 export function startDiceRoyalePick(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   room.state.timerEnd = Date.now() + 15000;
-  io.to(room.code).emit('dice_royale_pick');
+  io.to(roomCode).emit('dice_royale_pick');
   broadcastRoomUpdate(room, io);
 
   // Timeout fallback
   setTimeout(() => {
-    if (room.state.phase === 'category_dice_royale' && room.state.diceRoyale?.phase === 'result') {
-      const randomCat = room.state.votingCategories[
-        Math.floor(Math.random() * room.state.votingCategories.length)
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_dice_royale' && currentRoom.state.diceRoyale?.phase === 'result') {
+      const randomCat = currentRoom.state.votingCategories[
+        Math.floor(Math.random() * currentRoom.state.votingCategories.length)
       ];
-      finalizeDiceRoyalePick(room, io, randomCat.id);
+      finalizeDiceRoyalePick(currentRoom, io, randomCat.id);
     }
   }, 15000);
 }
@@ -502,6 +566,13 @@ export function startDiceRoyalePick(room: GameRoom, io: SocketServer): void {
  * Finalisiert die Dice Royale Kategorie-Auswahl
  */
 export async function finalizeDiceRoyalePick(room: GameRoom, io: SocketServer, categoryId: string): Promise<void> {
+  // Guard: Nur einmal ausführen
+  if (room.state.phase !== 'category_dice_royale' || room.state.diceRoyale?.phase !== 'result') {
+    console.log(`⚠️ finalizeDiceRoyalePick called but phase is ${room.state.phase}, skipping`);
+    return;
+  }
+  room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
+  
   room.state.selectedCategory = categoryId;
   room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
   room.state.currentQuestionIndex = 0;
@@ -509,7 +580,8 @@ export async function finalizeDiceRoyalePick(room: GameRoom, io: SocketServer, c
   const categoryData = await getCategoryData(categoryId);
   const winner = room.state.diceRoyale?.winnerId ? room.players.get(room.state.diceRoyale.winnerId) : null;
   
-  io.to(room.code).emit('category_selected', { 
+  const roomCode = room.code;
+  io.to(roomCode).emit('category_selected', { 
     categoryId,
     categoryName: categoryData?.name,
     categoryIcon: categoryData?.icon,
@@ -521,8 +593,10 @@ export async function finalizeDiceRoyalePick(room: GameRoom, io: SocketServer, c
   room.state.diceRoyale = null;
 
   setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
     const { startQuestion } = require('./questions');
-    startQuestion(room, io);
+    startQuestion(currentRoom, io);
   }, 2500);
 }
 
@@ -563,8 +637,12 @@ export function handleDiceRoyaleRoll(room: GameRoom, io: SocketServer, playerId:
   });
 
   if (allRolled) {
+    const roomCode = room.code;
     setTimeout(() => {
-      checkDiceRoyaleResult(room, io);
+      const currentRoom = getRoom(roomCode);
+      if (currentRoom) {
+        checkDiceRoyaleResult(currentRoom, io);
+      }
     }, 1500);
   }
 }
@@ -577,6 +655,7 @@ export function handleDiceRoyaleRoll(room: GameRoom, io: SocketServer, playerId:
  * Startet ein RPS Duel (Schere Stein Papier)
  */
 export function startRPSDuel(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timers
   room.state.phase = 'category_rps_duel';
   
   const connectedPlayers = getConnectedPlayers(room);
@@ -610,7 +689,9 @@ export function startRPSDuel(room: GameRoom, io: SocketServer): void {
 
   // Send start event
   setTimeout(() => {
-    io.to(room.code).emit('rps_duel_start', {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
+    io.to(roomCode).emit('rps_duel_start', {
       player1: { id: player1.id, name: player1.name, avatarSeed: player1.avatarSeed },
       player2: { id: player2.id, name: player2.name, avatarSeed: player2.avatarSeed },
     });
@@ -618,9 +699,10 @@ export function startRPSDuel(room: GameRoom, io: SocketServer): void {
 
   // Start first round after intro
   setTimeout(() => {
-    if (room.state.rpsDuel) {
-      room.state.rpsDuel.phase = 'choosing';
-      startRPSRound(room, io);
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.rpsDuel) {
+      currentRoom.state.rpsDuel.phase = 'choosing';
+      startRPSRound(currentRoom, io);
     }
   }, 3000);
 }
@@ -629,32 +711,38 @@ export function startRPSDuel(room: GameRoom, io: SocketServer): void {
  * Startet eine RPS Runde
  */
 export function startRPSRound(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   const duel = room.state.rpsDuel;
   if (!duel) return;
 
+  const capturedRound = duel.currentRound; // Capture for validation
   room.state.timerEnd = Date.now() + 10000;
-  io.to(room.code).emit('rps_round_start', { round: duel.currentRound });
+  io.to(roomCode).emit('rps_round_start', { round: duel.currentRound });
   broadcastRoomUpdate(room, io);
 
   // Timeout - auto-choose
   setTimeout(() => {
-    if (room.state.phase === 'category_rps_duel' && duel.phase === 'choosing') {
-      const choices: RPSChoice[] = ['rock', 'paper', 'scissors'];
-      const p1CurrentChoice = duel.player1Choices[duel.currentRound - 1];
-      const p2CurrentChoice = duel.player2Choices[duel.currentRound - 1];
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
+    const currentDuel = currentRoom.state.rpsDuel;
+    if (!currentDuel || currentRoom.state.phase !== 'category_rps_duel' || currentDuel.phase !== 'choosing') return;
+    if (currentDuel.currentRound !== capturedRound) return; // Round already passed
+    
+    const choices: RPSChoice[] = ['rock', 'paper', 'scissors'];
+    const p1CurrentChoice = currentDuel.player1Choices[currentDuel.currentRound - 1];
+    const p2CurrentChoice = currentDuel.player2Choices[currentDuel.currentRound - 1];
 
-      if (!p1CurrentChoice) {
-        const autoChoice = choices[Math.floor(Math.random() * 3)];
-        duel.player1Choices.push(autoChoice);
-        io.to(room.code).emit('rps_choice_made', { playerId: duel.player1Id });
-      }
-      if (!p2CurrentChoice) {
-        const autoChoice = choices[Math.floor(Math.random() * 3)];
-        duel.player2Choices.push(autoChoice);
-        io.to(room.code).emit('rps_choice_made', { playerId: duel.player2Id });
-      }
-      resolveRPSRound(room, io);
+    if (!p1CurrentChoice) {
+      const autoChoice = choices[Math.floor(Math.random() * 3)];
+      currentDuel.player1Choices.push(autoChoice);
+      io.to(roomCode).emit('rps_choice_made', { playerId: currentDuel.player1Id });
     }
+    if (!p2CurrentChoice) {
+      const autoChoice = choices[Math.floor(Math.random() * 3)];
+      currentDuel.player2Choices.push(autoChoice);
+      io.to(roomCode).emit('rps_choice_made', { playerId: currentDuel.player2Id });
+    }
+    resolveRPSRound(currentRoom, io);
   }, 10000);
 }
 
@@ -662,6 +750,7 @@ export function startRPSRound(room: GameRoom, io: SocketServer): void {
  * Löst eine RPS Runde auf
  */
 export function resolveRPSRound(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timers
   const duel = room.state.rpsDuel;
   if (!duel) return;
 
@@ -671,6 +760,7 @@ export function resolveRPSRound(room: GameRoom, io: SocketServer): void {
   if (!p1Choice || !p2Choice) return;
 
   duel.phase = 'revealing';
+  const capturedRound = duel.currentRound;
 
   // Determine round winner
   let roundWinner: 'player1' | 'player2' | 'tie' = 'tie';
@@ -690,7 +780,7 @@ export function resolveRPSRound(room: GameRoom, io: SocketServer): void {
 
   console.log(`✊✌️✋ Round ${duel.currentRound}: ${p1Choice} vs ${p2Choice} - Winner: ${roundWinner}`);
 
-  io.to(room.code).emit('rps_round_result', {
+  io.to(roomCode).emit('rps_round_result', {
     round: duel.currentRound,
     player1Choice: p1Choice,
     player2Choice: p2Choice,
@@ -699,35 +789,52 @@ export function resolveRPSRound(room: GameRoom, io: SocketServer): void {
     player2Wins: duel.player2Wins,
   });
 
+  // Capture winner info for timers
+  const p1Wins = duel.player1Wins;
+  const p2Wins = duel.player2Wins;
+  const player1Id = duel.player1Id;
+  const player2Id = duel.player2Id;
+
   // Check for match winner (first to 2)
-  if (duel.player1Wins >= 2 || duel.player2Wins >= 2) {
+  if (p1Wins >= 2 || p2Wins >= 2) {
     setTimeout(() => {
-      const winnerId = duel.player1Wins >= 2 ? duel.player1Id : duel.player2Id;
-      finalizeRPSDuelWinner(room, io, winnerId);
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_rps_duel') return;
+      const winnerId = p1Wins >= 2 ? player1Id : player2Id;
+      finalizeRPSDuelWinner(currentRoom, io, winnerId);
     }, 2500);
-  } else if (duel.currentRound >= 3) {
+  } else if (capturedRound >= 3) {
     // After 3 rounds, whoever leads wins
     setTimeout(() => {
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_rps_duel') return;
+      const currentDuel = currentRoom.state.rpsDuel;
+      if (!currentDuel) return;
+      
       let winnerId: string;
-      if (duel.player1Wins > duel.player2Wins) {
-        winnerId = duel.player1Id;
-      } else if (duel.player2Wins > duel.player1Wins) {
-        winnerId = duel.player2Id;
+      if (p1Wins > p2Wins) {
+        winnerId = player1Id;
+      } else if (p2Wins > p1Wins) {
+        winnerId = player2Id;
       } else {
         // True tie - continue with extra round
-        duel.currentRound++;
-        duel.phase = 'choosing';
-        startRPSRound(room, io);
+        currentDuel.currentRound++;
+        currentDuel.phase = 'choosing';
+        startRPSRound(currentRoom, io);
         return;
       }
-      finalizeRPSDuelWinner(room, io, winnerId);
+      finalizeRPSDuelWinner(currentRoom, io, winnerId);
     }, 2500);
   } else {
     // Start next round
     setTimeout(() => {
-      duel.currentRound++;
-      duel.phase = 'choosing';
-      startRPSRound(room, io);
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_rps_duel') return;
+      const currentDuel = currentRoom.state.rpsDuel;
+      if (!currentDuel) return;
+      currentDuel.currentRound++;
+      currentDuel.phase = 'choosing';
+      startRPSRound(currentRoom, io);
     }, 2500);
   }
 }
@@ -736,6 +843,7 @@ export function resolveRPSRound(room: GameRoom, io: SocketServer): void {
  * Finalisiert den RPS Duel Gewinner
  */
 function finalizeRPSDuelWinner(room: GameRoom, io: SocketServer, winnerId: string): void {
+  const roomCode = room.code; // Capture for timer
   const duel = room.state.rpsDuel;
   if (!duel) return;
 
@@ -748,10 +856,10 @@ function finalizeRPSDuelWinner(room: GameRoom, io: SocketServer, winnerId: strin
 
   // Notify bot manager
   if (dev) {
-    botManager.onRPSDuelWinner(room.code, winnerId);
+    botManager.onRPSDuelWinner(roomCode, winnerId);
   }
 
-  io.to(room.code).emit('rps_duel_winner', {
+  io.to(roomCode).emit('rps_duel_winner', {
     winnerId,
     winnerName: winner?.name,
     player1Wins: duel.player1Wins,
@@ -761,8 +869,9 @@ function finalizeRPSDuelWinner(room: GameRoom, io: SocketServer, winnerId: strin
 
   // Let winner pick
   setTimeout(() => {
-    if (room.state.phase === 'category_rps_duel') {
-      startRPSDuelPick(room, io);
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_rps_duel') {
+      startRPSDuelPick(currentRoom, io);
     }
   }, 3000);
 }
@@ -771,17 +880,19 @@ function finalizeRPSDuelWinner(room: GameRoom, io: SocketServer, winnerId: strin
  * Startet die Kategorie-Auswahl für den RPS Duel Gewinner
  */
 export function startRPSDuelPick(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   room.state.timerEnd = Date.now() + 15000;
-  io.to(room.code).emit('rps_duel_pick');
+  io.to(roomCode).emit('rps_duel_pick');
   broadcastRoomUpdate(room, io);
 
   // Timeout fallback
   setTimeout(() => {
-    if (room.state.phase === 'category_rps_duel' && room.state.rpsDuel?.phase === 'result') {
-      const randomCat = room.state.votingCategories[
-        Math.floor(Math.random() * room.state.votingCategories.length)
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'category_rps_duel' && currentRoom.state.rpsDuel?.phase === 'result') {
+      const randomCat = currentRoom.state.votingCategories[
+        Math.floor(Math.random() * currentRoom.state.votingCategories.length)
       ];
-      finalizeRPSDuelPick(room, io, randomCat.id);
+      finalizeRPSDuelPick(currentRoom, io, randomCat.id);
     }
   }, 15000);
 }
@@ -790,6 +901,13 @@ export function startRPSDuelPick(room: GameRoom, io: SocketServer): void {
  * Finalisiert die RPS Duel Kategorie-Auswahl
  */
 export async function finalizeRPSDuelPick(room: GameRoom, io: SocketServer, categoryId: string): Promise<void> {
+  // Guard: Nur einmal ausführen
+  if (room.state.phase !== 'category_rps_duel' || room.state.rpsDuel?.phase !== 'result') {
+    console.log(`⚠️ finalizeRPSDuelPick called but phase is ${room.state.phase}, skipping`);
+    return;
+  }
+  room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
+  
   room.state.selectedCategory = categoryId;
   room.state.roundQuestions = await getQuestionsForRoom(room, categoryId, room.settings.questionsPerRound);
   room.state.currentQuestionIndex = 0;
@@ -797,7 +915,8 @@ export async function finalizeRPSDuelPick(room: GameRoom, io: SocketServer, cate
   const categoryData = await getCategoryData(categoryId);
   const winner = room.state.rpsDuel?.winnerId ? room.players.get(room.state.rpsDuel.winnerId) : null;
   
-  io.to(room.code).emit('category_selected', { 
+  const roomCode = room.code;
+  io.to(roomCode).emit('category_selected', { 
     categoryId,
     categoryName: categoryData?.name,
     categoryIcon: categoryData?.icon,
@@ -809,8 +928,10 @@ export async function finalizeRPSDuelPick(room: GameRoom, io: SocketServer, cate
   room.state.rpsDuel = null;
 
   setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom) return;
     const { startQuestion } = require('./questions');
-    startQuestion(room, io);
+    startQuestion(currentRoom, io);
   }, 2500);
 }
 

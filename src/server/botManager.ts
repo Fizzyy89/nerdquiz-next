@@ -102,9 +102,33 @@ class BotManager {
   }
 
   /**
+   * Clear all timers for bots in a specific room
+   * Should be called when phase changes to prevent stale actions
+   */
+  clearRoomTimers(roomCode: string): void {
+    const keysToDelete: string[] = [];
+    for (const [key, timer] of this.activeTimers) {
+      // Check if this timer belongs to a bot in this room
+      const botId = key.split('-')[0];
+      const bot = this.bots.get(botId);
+      if (bot && bot.roomCode === roomCode) {
+        clearTimeout(timer);
+        keysToDelete.push(key);
+      }
+    }
+    keysToDelete.forEach(key => this.activeTimers.delete(key));
+    if (keysToDelete.length > 0) {
+      console.log(`🤖 Cleared ${keysToDelete.length} bot timers for room ${roomCode}`);
+    }
+  }
+
+  /**
    * Trigger bot actions based on game phase change
    */
   onPhaseChange(roomCode: string, phase: string) {
+    // Clear any pending timers from previous phase to prevent stale actions
+    this.clearRoomTimers(roomCode);
+    
     const botsInRoom = this.getBotsInRoom(roomCode);
     if (botsInRoom.length === 0) return;
 
@@ -156,6 +180,8 @@ class BotManager {
     const unguessedItems = bonusRound.items.filter((item: any) => !item.guessedBy);
     if (unguessedItems.length === 0) return;
 
+    const turnNumber = bonusRound.turnNumber; // Capture for validation
+
     // Bot decides: 80% chance to try an answer, 20% chance to skip (get eliminated)
     const shouldTry = Math.random() < 0.8;
     
@@ -165,14 +191,20 @@ class BotManager {
       const timerId = `${bot.id}-bonus-skip`;
       
       const timer = setTimeout(() => {
+        this.activeTimers.delete(timerId);
+        
+        // Re-validate state before action
+        const currentRoom = this.getRoomFn?.(roomCode);
+        if (!currentRoom || currentRoom.state.phase !== 'bonus_round') return;
+        if (!currentRoom.state.bonusRound || currentRoom.state.bonusRound.phase !== 'playing') return;
+        if (currentRoom.state.bonusRound.turnNumber !== turnNumber) return; // Turn already passed
+        
         console.log(`🤖 ${bot.name} gives up (bonus round)`);
         
         this.triggerAction('bonus_round_skip', {
           roomCode: bot.roomCode,
           playerId: bot.id,
         });
-        
-        this.activeTimers.delete(timerId);
       }, delay);
       
       this.activeTimers.set(timerId, timer);
@@ -184,8 +216,16 @@ class BotManager {
     const timerId = `${bot.id}-bonus-answer`;
     
     const timer = setTimeout(() => {
+      this.activeTimers.delete(timerId);
+      
+      // Re-validate state before action
+      const currentRoom = this.getRoomFn?.(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'bonus_round') return;
+      if (!currentRoom.state.bonusRound || currentRoom.state.bonusRound.phase !== 'playing') return;
+      if (currentRoom.state.bonusRound.turnNumber !== turnNumber) return; // Turn already passed
+      
       // Re-check unguessed items (they may have changed)
-      const currentUnguessed = bonusRound.items.filter((item: any) => !item.guessedBy);
+      const currentUnguessed = currentRoom.state.bonusRound.items.filter((item: any) => !item.guessedBy);
       if (currentUnguessed.length === 0) return;
       
       const randomItem = currentUnguessed[Math.floor(Math.random() * currentUnguessed.length)];
@@ -200,8 +240,6 @@ class BotManager {
         playerId: bot.id,
         answer: answer,
       });
-      
-      this.activeTimers.delete(timerId);
     }, delay);
     
     this.activeTimers.set(timerId, timer);
@@ -213,13 +251,23 @@ class BotManager {
   private handleVotingPhase(bots: BotPlayer[], room: GameRoom) {
     const categories = room.state.votingCategories;
     if (!categories || categories.length === 0) return;
+    const roomCode = room.code;
 
     for (const bot of bots) {
       const delay = this.randomDelay(1000, 4000);
       const timerId = `${bot.id}-vote`;
       
       const timer = setTimeout(() => {
-        const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+        this.activeTimers.delete(timerId);
+        
+        // Re-fetch room to validate state
+        const currentRoom = this.getRoomFn?.(roomCode);
+        if (!currentRoom || currentRoom.state.phase !== 'category_voting') return;
+        
+        const currentCategories = currentRoom.state.votingCategories;
+        if (!currentCategories || currentCategories.length === 0) return;
+        
+        const randomCategory = currentCategories[Math.floor(Math.random() * currentCategories.length)];
         console.log(`🤖 ${bot.name} votes for ${randomCategory.name}`);
         
         this.triggerAction('vote_category', {
@@ -227,8 +275,6 @@ class BotManager {
           playerId: bot.id,
           categoryId: randomCategory.id,
         });
-        
-        this.activeTimers.delete(timerId);
       }, delay);
       
       this.activeTimers.set(timerId, timer);
@@ -239,9 +285,15 @@ class BotManager {
    * Handle Dice Royale phase - all bots roll dice
    */
   private handleDiceRoyalePhase(bots: BotPlayer[], room: GameRoom) {
+    const roomCode = room.code;
+    
     // Wait for the royale to be ready (rolling phase)
     const checkAndRoll = () => {
-      const royale = room.state.diceRoyale;
+      // Re-fetch room to validate state
+      const currentRoom = this.getRoomFn?.(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_dice_royale') return;
+      
+      const royale = currentRoom.state.diceRoyale;
       if (!royale || royale.phase !== 'rolling') return;
 
       for (const bot of bots) {
@@ -254,14 +306,19 @@ class BotManager {
           const timerId = `${bot.id}-dice-royale`;
           
           const timer = setTimeout(() => {
+            this.activeTimers.delete(timerId);
+            
+            // Re-validate state before action
+            const innerRoom = this.getRoomFn?.(roomCode);
+            if (!innerRoom || innerRoom.state.phase !== 'category_dice_royale') return;
+            if (!innerRoom.state.diceRoyale || innerRoom.state.diceRoyale.phase !== 'rolling') return;
+            
             console.log(`🤖 ${bot.name} rolls the dice (Dice Royale)!`);
             
             this.triggerAction('dice_royale_roll', {
               roomCode: bot.roomCode,
               playerId: bot.id,
             });
-            
-            this.activeTimers.delete(timerId);
           }, delay);
           
           this.activeTimers.set(timerId, timer);
@@ -277,9 +334,15 @@ class BotManager {
    * Handle RPS Duel phase - bots choose rock/paper/scissors
    */
   private handleRPSDuelPhase(bots: BotPlayer[], room: GameRoom) {
+    const roomCode = room.code;
+    
     // Wait for the choosing phase
     const checkAndChoose = () => {
-      const duel = room.state.rpsDuel;
+      // Re-fetch room to validate state
+      const currentRoom = this.getRoomFn?.(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_rps_duel') return;
+      
+      const duel = currentRoom.state.rpsDuel;
       if (!duel || duel.phase !== 'choosing') return;
 
       for (const bot of bots) {
@@ -291,13 +354,22 @@ class BotManager {
         const hasChosen = isPlayer1 
           ? duel.player1Choices?.[currentIndex] 
           : duel.player2Choices?.[currentIndex];
+        const capturedRound = duel.currentRound;
 
         if (!hasChosen) {
           // Bots choose immediately (100-400ms) to not slow down the game
           const delay = this.randomDelay(100, 400);
-          const timerId = `${bot.id}-rps-${duel.currentRound}`;
+          const timerId = `${bot.id}-rps-${capturedRound}`;
           
           const timer = setTimeout(() => {
+            this.activeTimers.delete(timerId);
+            
+            // Re-validate state before action
+            const innerRoom = this.getRoomFn?.(roomCode);
+            if (!innerRoom || innerRoom.state.phase !== 'category_rps_duel') return;
+            if (!innerRoom.state.rpsDuel || innerRoom.state.rpsDuel.phase !== 'choosing') return;
+            if (innerRoom.state.rpsDuel.currentRound !== capturedRound) return;
+            
             const choices = ['rock', 'paper', 'scissors'];
             const choice = choices[Math.floor(Math.random() * 3)];
             console.log(`🤖 ${bot.name} chooses ${choice} (RPS Duel)!`);
@@ -307,8 +379,6 @@ class BotManager {
               playerId: bot.id,
               choice,
             });
-            
-            this.activeTimers.delete(timerId);
           }, delay);
           
           this.activeTimers.set(timerId, timer);
@@ -326,6 +396,7 @@ class BotManager {
   private handleLoserPickPhase(bots: BotPlayer[], room: GameRoom) {
     const loserId = room.state.loserPickPlayerId;
     const categories = room.state.votingCategories;
+    const roomCode = room.code;
     
     for (const bot of bots) {
       if (bot.id === loserId && categories.length > 0) {
@@ -333,7 +404,16 @@ class BotManager {
         const timerId = `${bot.id}-loserpick`;
         
         const timer = setTimeout(() => {
-          const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+          this.activeTimers.delete(timerId);
+          
+          // Re-fetch room to validate state
+          const currentRoom = this.getRoomFn?.(roomCode);
+          if (!currentRoom || currentRoom.state.phase !== 'category_losers_pick') return;
+          
+          const currentCategories = currentRoom.state.votingCategories;
+          if (!currentCategories || currentCategories.length === 0) return;
+          
+          const randomCategory = currentCategories[Math.floor(Math.random() * currentCategories.length)];
           console.log(`🤖 ${bot.name} (loser) picks ${randomCategory.name}`);
           
           this.triggerAction('loser_pick_category', {
@@ -341,8 +421,6 @@ class BotManager {
             playerId: bot.id,
             categoryId: randomCategory.id,
           });
-          
-          this.activeTimers.delete(timerId);
         }, delay);
         
         this.activeTimers.set(timerId, timer);
@@ -356,15 +434,23 @@ class BotManager {
   private handleQuestionPhase(bots: BotPlayer[], room: GameRoom) {
     const question = room.state.currentQuestion;
     if (!question || !question.answers) return;
+    const roomCode = room.code;
+    const questionAnswerCount = question.answers.length;
 
     for (const bot of bots) {
       const delay = this.randomDelay(1500, 8000);
       const timerId = `${bot.id}-answer`;
       
       const timer = setTimeout(() => {
+        this.activeTimers.delete(timerId);
+        
+        // Re-fetch room to validate state
+        const currentRoom = this.getRoomFn?.(roomCode);
+        if (!currentRoom || currentRoom.state.phase !== 'question') return;
+        
         // 60% chance to get it right (if we knew the answer), otherwise random
         // Since we don't know the correct answer here, just pick random
-        const randomAnswer = Math.floor(Math.random() * question.answers.length);
+        const randomAnswer = Math.floor(Math.random() * questionAnswerCount);
         console.log(`🤖 ${bot.name} answers: ${randomAnswer}`);
         
         this.triggerAction('submit_answer', {
@@ -372,8 +458,6 @@ class BotManager {
           playerId: bot.id,
           answerIndex: randomAnswer,
         });
-        
-        this.activeTimers.delete(timerId);
       }, delay);
       
       this.activeTimers.set(timerId, timer);
@@ -386,14 +470,21 @@ class BotManager {
   private handleEstimationPhase(bots: BotPlayer[], room: GameRoom) {
     const question = room.state.currentQuestion;
     if (!question || question.correctValue === undefined) return;
+    const roomCode = room.code;
+    const correctValue = question.correctValue;
 
     for (const bot of bots) {
       const delay = this.randomDelay(2000, 10000);
       const timerId = `${bot.id}-estimation`;
       
       const timer = setTimeout(() => {
+        this.activeTimers.delete(timerId);
+        
+        // Re-fetch room to validate state
+        const currentRoom = this.getRoomFn?.(roomCode);
+        if (!currentRoom || currentRoom.state.phase !== 'estimation') return;
+        
         // Generate estimation within ±50% of correct value
-        const correctValue = question.correctValue;
         const variance = correctValue * (0.5 * (Math.random() * 2 - 1)); // ±50%
         const estimation = Math.round(correctValue + variance);
         
@@ -404,8 +495,6 @@ class BotManager {
           playerId: bot.id,
           value: Math.max(0, estimation), // Don't go negative
         });
-        
-        this.activeTimers.delete(timerId);
       }, delay);
       
       this.activeTimers.set(timerId, timer);
@@ -429,7 +518,17 @@ class BotManager {
     const timerId = `${bot.id}-dice-royale-pick`;
     
     const timer = setTimeout(() => {
-      const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+      this.activeTimers.delete(timerId);
+      
+      // Re-validate state before action
+      const currentRoom = this.getRoomFn?.(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_dice_royale') return;
+      if (!currentRoom.state.diceRoyale || currentRoom.state.diceRoyale.phase !== 'result') return;
+      
+      const currentCategories = currentRoom.state.votingCategories;
+      if (!currentCategories || currentCategories.length === 0) return;
+      
+      const randomCategory = currentCategories[Math.floor(Math.random() * currentCategories.length)];
       console.log(`🤖 ${bot.name} (Dice Royale winner) picks ${randomCategory.name}`);
       
       this.triggerAction('dice_royale_pick', {
@@ -437,8 +536,6 @@ class BotManager {
         playerId: bot.id,
         categoryId: randomCategory.id,
       });
-      
-      this.activeTimers.delete(timerId);
     }, delay);
     
     this.activeTimers.set(timerId, timer);
@@ -461,7 +558,17 @@ class BotManager {
     const timerId = `${bot.id}-rps-pick`;
     
     const timer = setTimeout(() => {
-      const randomCategory = categories[Math.floor(Math.random() * categories.length)];
+      this.activeTimers.delete(timerId);
+      
+      // Re-validate state before action
+      const currentRoom = this.getRoomFn?.(roomCode);
+      if (!currentRoom || currentRoom.state.phase !== 'category_rps_duel') return;
+      if (!currentRoom.state.rpsDuel || currentRoom.state.rpsDuel.phase !== 'result') return;
+      
+      const currentCategories = currentRoom.state.votingCategories;
+      if (!currentCategories || currentCategories.length === 0) return;
+      
+      const randomCategory = currentCategories[Math.floor(Math.random() * currentCategories.length)];
       console.log(`🤖 ${bot.name} (RPS Duel winner) picks ${randomCategory.name}`);
       
       this.triggerAction('rps_duel_pick', {
@@ -469,8 +576,6 @@ class BotManager {
         playerId: bot.id,
         categoryId: randomCategory.id,
       });
-      
-      this.activeTimers.delete(timerId);
     }, delay);
     
     this.activeTimers.set(timerId, timer);

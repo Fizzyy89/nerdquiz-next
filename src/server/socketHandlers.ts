@@ -19,6 +19,7 @@ import {
   scheduleRoomCleanupIfEmpty,
   getConnectedPlayers,
   rollDie,
+  forEachRoom,
 } from './roomStore';
 import { botManager } from './botManager';
 import * as questionLoader from './questionLoader';
@@ -34,6 +35,7 @@ import {
   checkDiceRoyaleResult,
   resolveRPSRound,
   getQuestionsForRoom,
+  startRPSDuelPick,
 } from './gameLogic/categorySelection';
 import {
   handleAnswer,
@@ -290,7 +292,9 @@ function handleVoteCategory(io: SocketServer) {
     room.state.categoryVotes.set(data.playerId, data.categoryId);
     broadcastRoomUpdate(room, io);
 
-    if (room.state.categoryVotes.size >= room.players.size) {
+    // Only count connected players for voting completion
+    const connectedCount = getConnectedPlayers(room).length;
+    if (room.state.categoryVotes.size >= connectedCount) {
       finalizeCategoryVoting(room, io);
     }
   };
@@ -718,29 +722,20 @@ function handleDisconnect(socket: Socket, io: SocketServer) {
     let foundPlayer: Player | undefined;
     let roomCode: string | undefined;
     
-    // We need to iterate through all rooms
-    const allRooms = new Map<string, GameRoom>();
-    // Since we can't easily iterate from roomStore, we'll check each known room
-    // This is a limitation - we need a different approach
-    
-    // Alternative: Store socket -> room mapping (would require additional tracking)
-    // For now, we'll use a workaround by checking socket rooms
-    const socketRooms = Array.from(socket.rooms).filter(r => r !== socket.id);
-    
-    for (const code of socketRooms) {
-      const room = getRoom(code);
-      if (room) {
-        room.players.forEach((player) => {
-          if (player.socketId === socket.id) {
-            foundRoom = room;
-            foundPlayer = player;
-            roomCode = code;
-          }
-        });
-      }
-    }
+    // Iterate through ALL rooms to find the player by socketId
+    // (socket.rooms might already be empty at disconnect time)
+    forEachRoom((room, code) => {
+      room.players.forEach((player) => {
+        if (player.socketId === socket.id && player.isConnected) {
+          foundRoom = room;
+          foundPlayer = player;
+          roomCode = code;
+        }
+      });
+    });
     
     if (foundRoom && foundPlayer && roomCode) {
+      console.log(`👋 Player ${foundPlayer.name} disconnected from room ${roomCode}`);
       foundPlayer.isConnected = false;
       
       // Handle host transfer
@@ -761,10 +756,166 @@ function handleDisconnect(socket: Socket, io: SocketServer) {
       });
       broadcastRoomUpdate(foundRoom, io);
 
+      // Check if disconnect affects current game phase
+      checkPhaseProgressAfterDisconnect(foundRoom, io, foundPlayer.id);
+
       // Schedule cleanup if all disconnected
       scheduleRoomCleanupIfEmpty(foundRoom, io);
     }
   };
+}
+
+/**
+ * Nach einem Disconnect prüfen ob der Spielablauf fortgesetzt werden kann
+ * (z.B. wenn jetzt alle verbleibenden Spieler geantwortet haben)
+ */
+function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, disconnectedPlayerId: string): void {
+  const phase = room.state.phase;
+  const connectedPlayers = getConnectedPlayers(room);
+  
+  // Wenn keine Spieler mehr da sind, nichts zu tun
+  if (connectedPlayers.length === 0) return;
+  
+  switch (phase) {
+    case 'category_voting': {
+      // Prüfen ob alle verbundenen Spieler gevotet haben
+      const connectedVoteCount = connectedPlayers.filter(p => 
+        room.state.categoryVotes.has(p.id)
+      ).length;
+      if (connectedVoteCount >= connectedPlayers.length) {
+        console.log(`📊 All connected players have voted after disconnect, finalizing...`);
+        finalizeCategoryVoting(room, io);
+      }
+      break;
+    }
+    
+    case 'question': {
+      // Prüfen ob alle verbundenen Spieler geantwortet haben
+      const allAnswered = connectedPlayers.every(p => p.currentAnswer !== null);
+      if (allAnswered) {
+        console.log(`✅ All connected players have answered after disconnect, revealing...`);
+        if (room.questionTimer) clearTimeout(room.questionTimer);
+        showAnswer(room, io);
+      }
+      break;
+    }
+    
+    case 'estimation': {
+      // Prüfen ob alle verbundenen Spieler geschätzt haben
+      const allEstimated = connectedPlayers.every(p => p.estimationAnswer !== null);
+      if (allEstimated) {
+        console.log(`✅ All connected players have estimated after disconnect, revealing...`);
+        if (room.questionTimer) clearTimeout(room.questionTimer);
+        showEstimationAnswer(room, io);
+      }
+      break;
+    }
+    
+    case 'category_dice_royale': {
+      // Prüfen ob alle verbundenen Spieler gewürfelt haben
+      const royale = room.state.diceRoyale;
+      if (royale && royale.phase === 'rolling') {
+        const eligiblePlayers = royale.tiedPlayerIds || Array.from(royale.playerRolls.keys());
+        const connectedEligible = eligiblePlayers.filter(id => {
+          const player = room.players.get(id);
+          return player?.isConnected;
+        });
+        const allRolled = connectedEligible.every(id => royale.playerRolls.get(id) !== null);
+        if (allRolled && connectedEligible.length > 0) {
+          console.log(`🎲 All connected players have rolled after disconnect, checking result...`);
+          checkDiceRoyaleResult(room, io);
+        }
+      }
+      break;
+    }
+    
+    case 'category_losers_pick': {
+      // Wenn der Loser disconnected ist, wähle zufällig
+      if (room.state.loserPickPlayerId === disconnectedPlayerId) {
+        console.log(`😢 Loser picker disconnected, selecting random category...`);
+        const randomCat = room.state.votingCategories[
+          Math.floor(Math.random() * room.state.votingCategories.length)
+        ];
+        if (randomCat) {
+          finalizeLosersPick(room, io, randomCat.id);
+        }
+      }
+      break;
+    }
+    
+    case 'category_rps_duel': {
+      // Wenn ein Duellant disconnected, gewinnt der andere
+      const duel = room.state.rpsDuel;
+      if (duel && (duel.player1Id === disconnectedPlayerId || duel.player2Id === disconnectedPlayerId)) {
+        const winnerId = duel.player1Id === disconnectedPlayerId ? duel.player2Id : duel.player1Id;
+        const winner = room.players.get(winnerId);
+        console.log(`✊✌️✋ RPS Duel player disconnected, ${winner?.name} wins by default`);
+        
+        duel.winnerId = winnerId;
+        duel.phase = 'result';
+        room.state.loserPickPlayerId = winnerId;
+        
+        io.to(room.code).emit('rps_duel_winner', {
+          winnerId,
+          winnerName: winner?.name,
+          player1Wins: duel.player1Wins,
+          player2Wins: duel.player2Wins,
+          byDefault: true,
+        });
+        broadcastRoomUpdate(room, io);
+        
+        // Let winner pick after delay
+        const roomCode = room.code;
+        setTimeout(() => {
+          const currentRoom = getRoom(roomCode);
+          if (currentRoom && currentRoom.state.phase === 'category_rps_duel') {
+            startRPSDuelPick(currentRoom, io);
+          }
+        }, 2000);
+      }
+      break;
+    }
+    
+    case 'bonus_round': {
+      // Wenn der aktive Spieler disconnected, überspringe ihn
+      const bonusRound = room.state.bonusRound;
+      if (bonusRound && bonusRound.phase === 'playing') {
+        const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
+        if (currentPlayerId === disconnectedPlayerId) {
+          console.log(`🎯 Active bonus round player disconnected, eliminating...`);
+          // Import and call elimination
+          const { eliminatePlayer } = require('./gameLogic/bonusRound');
+          eliminatePlayer(room, io, disconnectedPlayerId, 'timeout');
+        } else {
+          // Remove from active players if they're waiting
+          const idx = bonusRound.activePlayers.indexOf(disconnectedPlayerId);
+          if (idx !== -1) {
+            bonusRound.activePlayers.splice(idx, 1);
+            // Adjust turn index if needed
+            if (idx < bonusRound.currentTurnIndex) {
+              bonusRound.currentTurnIndex = Math.max(0, bonusRound.currentTurnIndex - 1);
+            }
+            broadcastRoomUpdate(room, io);
+          }
+        }
+      }
+      break;
+    }
+    
+    case 'rematch_voting': {
+      // Disconnected während Rematch-Voting = automatisch "no"
+      room.state.rematchVotes.set(disconnectedPlayerId, 'no');
+      
+      // Check if all connected have voted
+      const allVoted = connectedPlayers.every(p => room.state.rematchVotes.has(p.id));
+      if (allVoted) {
+        console.log(`🗳️ All connected players voted after disconnect, finalizing rematch...`);
+        const { finalizeRematchVoting } = require('./gameLogic/matchFlow');
+        finalizeRematchVoting(room, io);
+      }
+      break;
+    }
+  }
 }
 
 // ============================================
@@ -779,7 +930,9 @@ function setupBotHandlers(io: SocketServer) {
     if (!room || room.state.phase !== 'category_voting') return;
     room.state.categoryVotes.set(data.playerId, data.categoryId);
     broadcastRoomUpdate(room, io);
-    if (room.state.categoryVotes.size >= room.players.size) {
+    // Only count connected players for voting completion
+    const connectedCount = getConnectedPlayers(room).length;
+    if (room.state.categoryVotes.size >= connectedCount) {
       finalizeCategoryVoting(room, io);
     }
   });

@@ -33,6 +33,8 @@ const dev = process.env.NODE_ENV !== 'production';
  * Startet eine Bonusrunde
  */
 export function startBonusRound(room: GameRoom, io: SocketServer, config: BonusRoundConfig): void {
+  const roomCode = room.code; // Capture for timer
+  
   // Sort players by score (worst to best) for turn order
   const sortedPlayers = getConnectedPlayers(room).sort((a, b) => a.score - b.score);
   const turnOrder = sortedPlayers.map(p => p.id);
@@ -70,9 +72,12 @@ export function startBonusRound(room: GameRoom, io: SocketServer, config: BonusR
 
   // After intro delay, start playing
   setTimeout(() => {
-    if (room.state.bonusRound) {
-      room.state.bonusRound.phase = 'playing';
-      startBonusRoundTurn(room, io);
+    // Re-fetch room to ensure current state
+    const { getRoom } = require('../roomStore');
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.bonusRound && currentRoom.state.bonusRound.phase === 'intro') {
+      currentRoom.state.bonusRound.phase = 'playing';
+      startBonusRoundTurn(currentRoom, io);
     }
   }, 3000);
 }
@@ -85,12 +90,31 @@ export function startBonusRound(room: GameRoom, io: SocketServer, config: BonusR
  * Startet einen neuen Zug in der Bonusrunde
  */
 export function startBonusRoundTurn(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   const bonusRound = room.state.bonusRound;
   if (!bonusRound || bonusRound.activePlayers.length === 0) return;
 
   // Clear any existing timer
   if (bonusRound.currentTurnTimer) {
     clearTimeout(bonusRound.currentTurnTimer);
+  }
+
+  // Remove any disconnected players from active players before starting turn
+  bonusRound.activePlayers = bonusRound.activePlayers.filter(playerId => {
+    const player = room.players.get(playerId);
+    return player?.isConnected;
+  });
+  
+  // Check if we still have active players after filtering
+  if (bonusRound.activePlayers.length === 0) {
+    endBonusRound(room, io, 'last_standing');
+    return;
+  }
+  
+  if (bonusRound.activePlayers.length === 1) {
+    // Only one player left = winner
+    endBonusRound(room, io, 'last_standing');
+    return;
   }
 
   bonusRound.turnNumber++;
@@ -101,10 +125,11 @@ export function startBonusRoundTurn(room: GameRoom, io: SocketServer): void {
   
   // Set timer
   room.state.timerEnd = Date.now() + (bonusRound.timePerTurn * 1000);
+  const turnNumber = bonusRound.turnNumber; // Capture for timer validation
   
   console.log(`🎯 Bonus Round Turn ${bonusRound.turnNumber}: ${player?.name}'s turn (${bonusRound.timePerTurn}s)`);
   
-  io.to(room.code).emit('bonus_round_turn', {
+  io.to(roomCode).emit('bonus_round_turn', {
     playerId: currentPlayerId,
     playerName: player?.name,
     turnNumber: bonusRound.turnNumber,
@@ -114,12 +139,20 @@ export function startBonusRoundTurn(room: GameRoom, io: SocketServer): void {
 
   // Notify bots if it's their turn
   if (dev) {
-    botManager.onBonusRoundTurn(room.code, currentPlayerId);
+    botManager.onBonusRoundTurn(roomCode, currentPlayerId);
   }
 
   // Set timeout for this turn
   bonusRound.currentTurnTimer = setTimeout(() => {
-    handleBonusRoundTimeout(room, io, currentPlayerId);
+    // Re-fetch room and validate turn is still active
+    const { getRoom } = require('../roomStore');
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && 
+        currentRoom.state.bonusRound && 
+        currentRoom.state.bonusRound.turnNumber === turnNumber &&
+        currentRoom.state.bonusRound.phase === 'playing') {
+      handleBonusRoundTimeout(currentRoom, io, currentPlayerId);
+    }
   }, bonusRound.timePerTurn * 1000);
 }
 
@@ -215,8 +248,13 @@ export function handleBonusRoundAnswer(room: GameRoom, io: SocketServer, playerI
     broadcastRoomUpdate(room, io);
     
     // Small delay before next turn
+    const roomCode = room.code;
     setTimeout(() => {
-      startBonusRoundTurn(room, io);
+      const { getRoom } = require('../roomStore');
+      const currentRoom = getRoom(roomCode);
+      if (currentRoom && currentRoom.state.bonusRound?.phase === 'playing') {
+        startBonusRoundTurn(currentRoom, io);
+      }
     }, 1500);
   } else {
     // Wrong answer - player is eliminated
@@ -343,8 +381,13 @@ export function eliminatePlayer(
   broadcastRoomUpdate(room, io);
 
   // Small delay before next turn
+  const roomCode = room.code;
   setTimeout(() => {
-    startBonusRoundTurn(room, io);
+    const { getRoom } = require('../roomStore');
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.bonusRound?.phase === 'playing') {
+      startBonusRoundTurn(currentRoom, io);
+    }
   }, 2000);
 }
 
@@ -447,14 +490,19 @@ export function endBonusRound(room: GameRoom, io: SocketServer, reason: 'last_st
   // Auto-advance after showing results
   // If this was the last round, go directly to final results
   const isLastRound = room.state.currentRound >= room.settings.maxRounds;
+  const roomCode = room.code;
   
   setTimeout(() => {
+    const { getRoom } = require('../roomStore');
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom || currentRoom.state.phase !== 'bonus_round_result') return;
+    
     if (isLastRound) {
       const { showFinalResults } = require('./matchFlow');
-      showFinalResults(room, io);
+      showFinalResults(currentRoom, io);
     } else {
       const { showScoreboard } = require('./matchFlow');
-      showScoreboard(room, io);
+      showScoreboard(currentRoom, io);
     }
   }, 8000);
 }

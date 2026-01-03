@@ -161,6 +161,15 @@ export function getConnectedPlayers(room: GameRoom): Player[] {
 }
 
 /**
+ * Gibt alle verbundenen menschlichen Spieler zurück (keine Bots)
+ */
+export function getConnectedHumanPlayers(room: GameRoom): Player[] {
+  return Array.from(room.players.values()).filter(p => 
+    p.isConnected && !p.socketId.startsWith('bot-')
+  );
+}
+
+/**
  * Setzt alle Spieler-Antworten zurück
  */
 export function resetPlayerAnswers(room: GameRoom): void {
@@ -342,15 +351,19 @@ export function cleanupRoom(code: string): void {
 }
 
 /**
- * Prüft ob alle Spieler disconnected sind und plant ggf. Löschung
+ * Prüft ob alle menschlichen Spieler disconnected sind und plant ggf. Löschung
+ * Bots werden nicht gezählt - nur echte Spieler halten den Raum am Leben
  */
 export function scheduleRoomCleanupIfEmpty(room: GameRoom, io: SocketServer, delayMs: number = 60000): void {
+  const roomCode = room.code;
   setTimeout(() => {
-    const currentRoom = rooms.get(room.code);
+    const currentRoom = rooms.get(roomCode);
     if (currentRoom) {
-      const connected = getConnectedPlayers(currentRoom);
-      if (connected.length === 0) {
-        cleanupRoom(room.code);
+      // Only count human players - bots don't keep a room alive
+      const connectedHumans = getConnectedHumanPlayers(currentRoom);
+      if (connectedHumans.length === 0) {
+        console.log(`🗑️ No human players connected in room ${roomCode}, cleaning up...`);
+        cleanupRoom(roomCode);
       }
     }
   }, delayMs);

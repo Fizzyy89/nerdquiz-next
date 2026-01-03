@@ -13,6 +13,7 @@ import type { GameRoom, BonusRoundConfig } from '../types';
 import { 
   getConnectedPlayers,
   getLoserPlayer,
+  getRoom,
   resetPlayerScores,
   roomToClient,
   emitPhaseChange,
@@ -98,12 +99,16 @@ export async function startCategorySelection(room: GameRoom, io: SocketServer): 
       broadcastRoomUpdate(room, io);
       
       // After roulette animation, start bonus round
+      const roomCode = room.code;
       setTimeout(() => {
-        const pendingQuestion = room.pendingBonusQuestion;
-        delete room.pendingBonusQuestion;
+        const currentRoom = getRoom(roomCode);
+        if (!currentRoom || currentRoom.state.phase !== 'bonus_round_announcement') return;
+        
+        const pendingQuestion = currentRoom.pendingBonusQuestion;
+        delete currentRoom.pendingBonusQuestion;
         
         if (pendingQuestion) {
-          startBonusRound(room, io, pendingQuestion);
+          startBonusRound(currentRoom, io, pendingQuestion);
         }
       }, 5500);
       
@@ -146,25 +151,30 @@ export async function startCategorySelection(room: GameRoom, io: SocketServer): 
   broadcastRoomUpdate(room, io);
 
   // After announcement + roulette, start selection
+  const roomCode = room.code;
+  const expectedMode = room.state.categorySelectionMode;
   setTimeout(() => {
-    switch (room.state.categorySelectionMode) {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom || currentRoom.state.phase !== 'category_announcement') return;
+    
+    switch (expectedMode) {
       case 'voting':
-        startCategoryVoting(room, io);
+        startCategoryVoting(currentRoom, io);
         break;
       case 'wheel':
-        startCategoryWheel(room, io);
+        startCategoryWheel(currentRoom, io);
         break;
       case 'losers_pick':
-        startLosersPick(room, io);
+        startLosersPick(currentRoom, io);
         break;
       case 'dice_royale':
-        startDiceRoyale(room, io);
+        startDiceRoyale(currentRoom, io);
         break;
       case 'rps_duel':
-        startRPSDuel(room, io);
+        startRPSDuel(currentRoom, io);
         break;
       default:
-        startCategoryVoting(room, io);
+        startCategoryVoting(currentRoom, io);
     }
   }, 5500);
 }
@@ -289,9 +299,11 @@ export function showFinalResults(room: GameRoom, io: SocketServer): void {
   broadcastRoomUpdate(room, io);
   
   // Start rematch voting after delay
+  const roomCode = room.code;
   setTimeout(() => {
-    if (room.state.phase === 'final') {
-      startRematchVoting(room, io);
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'final') {
+      startRematchVoting(currentRoom, io);
     }
   }, 8000);
 }
@@ -304,29 +316,31 @@ export function showFinalResults(room: GameRoom, io: SocketServer): void {
  * Startet das Rematch-Voting
  */
 export function startRematchVoting(room: GameRoom, io: SocketServer): void {
+  const roomCode = room.code; // Capture for timer
   room.state.phase = 'rematch_voting';
   room.state.rematchVotes = new Map();
   room.state.timerEnd = Date.now() + 20000;
   
-  console.log(`🗳️ Rematch voting started in room ${room.code}`);
+  console.log(`🗳️ Rematch voting started in room ${roomCode}`);
   
   emitPhaseChange(room, io, 'rematch_voting');
-  io.to(room.code).emit('rematch_voting_start', {
+  io.to(roomCode).emit('rematch_voting_start', {
     timerEnd: room.state.timerEnd,
   });
   broadcastRoomUpdate(room, io);
   
   // Timeout for voting
   setTimeout(() => {
-    if (room.state.phase === 'rematch_voting') {
+    const currentRoom = getRoom(roomCode);
+    if (currentRoom && currentRoom.state.phase === 'rematch_voting') {
       // Count non-voters as "no"
-      const connectedPlayers = getConnectedPlayers(room);
+      const connectedPlayers = getConnectedPlayers(currentRoom);
       connectedPlayers.forEach(p => {
-        if (!room.state.rematchVotes.has(p.id)) {
-          room.state.rematchVotes.set(p.id, 'no');
+        if (!currentRoom.state.rematchVotes.has(p.id)) {
+          currentRoom.state.rematchVotes.set(p.id, 'no');
         }
       });
-      finalizeRematchVoting(room, io);
+      finalizeRematchVoting(currentRoom, io);
     }
   }, 20000);
 }
