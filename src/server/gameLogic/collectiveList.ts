@@ -46,7 +46,7 @@ export function startCollectiveListRound(room: GameRoom, io: SocketServer, confi
     type: 'collective_list',
     phase: 'intro',
     questionId: config.id,
-    topic: config.topic,
+    topic: config.topic || 'Collective List',
     description: config.description,
     category: config.category,
     categoryIcon: config.categoryIcon,

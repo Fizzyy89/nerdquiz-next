@@ -643,7 +643,7 @@ export async function getRandomHotButtonQuestions(excludeIds: string[] = [], cou
 
     // Fetch random questions
     const questionsToFetch = Math.min(count, questionCount);
-    const randomOffsets = [];
+    const randomOffsets: number[] = [];
     
     // Generate random unique offsets
     for (let i = 0; i < questionsToFetch; i++) {

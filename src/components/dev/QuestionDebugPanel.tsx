@@ -348,10 +348,18 @@ export function QuestionDebugPanel() {
                           <span className="text-lg">{bonusRound.categoryIcon || '🎯'}</span>
                           <span className="font-medium">{bonusRound.topic}</span>
                         </div>
-                        <div className="flex items-center justify-between mt-1 text-amber-400/50">
-                          <span>Gefunden</span>
-                          <span className="font-mono">{bonusRound.revealedCount}/{bonusRound.totalItems}</span>
-                        </div>
+                        {bonusRound.type === 'collective_list' && (
+                          <div className="flex items-center justify-between mt-1 text-amber-400/50">
+                            <span>Gefunden</span>
+                            <span className="font-mono">{bonusRound.revealedCount}/{bonusRound.totalItems}</span>
+                          </div>
+                        )}
+                        {bonusRound.type === 'hot_button' && (
+                          <div className="flex items-center justify-between mt-1 text-amber-400/50">
+                            <span>Frage</span>
+                            <span className="font-mono">{bonusRound.currentQuestionIndex + 1}/{bonusRound.totalQuestions}</span>
+                          </div>
+                        )}
                       </div>
                     )}
 

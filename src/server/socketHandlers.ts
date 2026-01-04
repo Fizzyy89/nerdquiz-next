@@ -52,6 +52,9 @@ import {
   startBonusRound,
 } from './gameLogic/bonusRound';
 import {
+  handleHotButtonAnswer,
+} from './gameLogic/hotButton';
+import {
   startCategorySelection,
   showScoreboard,
   showFinalResults,
@@ -687,8 +690,8 @@ function handleDevCommand(io: SocketServer) {
           room.questionTimer = undefined;
         }
         
-        // Also pause bonus round timer if active
-        if (room.state.bonusRound?.currentTurnTimer) {
+        // Also pause bonus round timer if active (only for Collective List)
+        if (room.state.bonusRound?.type === 'collective_list' && room.state.bonusRound.currentTurnTimer) {
           clearTimeout(room.state.bonusRound.currentTurnTimer);
           room.state.bonusRound.currentTurnTimer = null;
         }

@@ -107,6 +107,7 @@ function QuestionTypeLabel({ type }: { type: QuestionType }) {
     TEXT_INPUT: { label: 'Freitext', color: 'bg-cyan-500/20 text-cyan-400' },
     MATCHING: { label: 'Zuordnung', color: 'bg-pink-500/20 text-pink-400' },
     COLLECTIVE_LIST: { label: 'Sammel-Liste', color: 'bg-amber-500/20 text-amber-400' },
+    HOT_BUTTON: { label: 'Hot Button', color: 'bg-yellow-500/20 text-yellow-400' },
   };
   
   const { label, color } = config[type] || { label: type, color: 'bg-muted' };
