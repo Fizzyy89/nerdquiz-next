@@ -11,7 +11,7 @@
 import type { Server as SocketServer } from 'socket.io';
 import type { GameRoom, AnswerResult, PlayerGameStats } from '../types';
 import { createInitialPlayerStats } from '../types';
-import { 
+import {
   getRoom,
   resetPlayerAnswers,
   roomToClient,
@@ -49,7 +49,7 @@ function updateCategoryStats(
   playerCatStats.total++;
   if (correct) playerCatStats.correct++;
   playerStats.categoryStats.set(category, playerCatStats);
-  
+
   // Global category performance
   const globalCatStats = gameStats.categoryPerformance.get(category) || { correct: 0, total: 0 };
   globalCatStats.total++;
@@ -66,28 +66,28 @@ function updateCategoryStats(
  */
 export async function startQuestion(room: GameRoom, io: SocketServer): Promise<void> {
   let question = room.state.roundQuestions[room.state.currentQuestionIndex];
-  
+
   // Check if we need to load more questions (Endless Mode)
   const isEndlessMode = room.isEndlessMode === true;
   const endlessCategoryId = room.endlessCategoryId;
-  
+
   if (!question && isEndlessMode && endlessCategoryId) {
     // Load more questions for endless mode
     const { getQuestionsForRoom } = await import('./categorySelection');
     console.log('♾️ Endless mode: Loading more questions...');
-    
+
     const newQuestions = await getQuestionsForRoom(room, endlessCategoryId, 50);
     if (newQuestions.length > 0) {
       room.state.roundQuestions = newQuestions;
       room.state.currentQuestionIndex = 0;
       question = newQuestions[0];
-      
-      io.to(room.code).emit('dev_notification', { 
-        message: `♾️ ${newQuestions.length} neue Fragen geladen` 
+
+      io.to(room.code).emit('dev_notification', {
+        message: `♾️ ${newQuestions.length} neue Fragen geladen`
       });
     }
   }
-  
+
   if (!question) {
     // No more questions - show scoreboard
     const { showScoreboard } = require('./matchFlow');
@@ -107,15 +107,26 @@ export async function startQuestion(room: GameRoom, io: SocketServer): Promise<v
   broadcastRoomUpdate(room, io);
 
   // Set timeout for auto-reveal
+  // RACE CONDITION FIX: Capture expected phase to prevent double-reveal
   const roomCode = room.code;
-  const questionIndex = room.state.currentQuestionIndex; // Capture for validation
+  const questionIndex = room.state.currentQuestionIndex;
+  const expectedPhase = room.state.phase; // 'question' or 'estimation'
+
   room.questionTimer = setTimeout(() => {
     const currentRoom = getRoom(roomCode);
-    if (!currentRoom || currentRoom.state.currentQuestionIndex !== questionIndex) return;
-    
-    if (currentRoom.state.phase === 'question') {
+    if (!currentRoom) return;
+
+    // Guard against race condition: Check BOTH questionIndex AND phase
+    // If phase already changed to 'revealing' or 'estimation_reveal', skip
+    if (currentRoom.state.currentQuestionIndex !== questionIndex) return;
+    if (currentRoom.state.phase !== expectedPhase) {
+      console.log(`⏱️ Timer skipped: phase already changed from ${expectedPhase} to ${currentRoom.state.phase}`);
+      return;
+    }
+
+    if (expectedPhase === 'question') {
       showAnswer(currentRoom, io);
-    } else if (currentRoom.state.phase === 'estimation') {
+    } else if (expectedPhase === 'estimation') {
       showEstimationAnswer(currentRoom, io);
     }
   }, room.settings.timePerQuestion * 1000);
@@ -138,9 +149,9 @@ export function handleAnswer(room: GameRoom, io: SocketServer, playerId: string,
   player.answerTime = room.state.timerEnd ? room.state.timerEnd - Date.now() : 0;
 
   broadcastRoomUpdate(room, io);
-  io.to(room.code).emit('player_answered', { 
+  io.to(room.code).emit('player_answered', {
     playerId: playerId,
-    playerName: player.name 
+    playerName: player.name
   });
 
   // Check if all players have answered
@@ -168,9 +179,9 @@ export function handleEstimation(room: GameRoom, io: SocketServer, playerId: str
   player.answerTime = room.state.timerEnd ? room.state.timerEnd - Date.now() : 0;
 
   broadcastRoomUpdate(room, io);
-  io.to(room.code).emit('player_answered', { 
+  io.to(room.code).emit('player_answered', {
     playerId: playerId,
-    playerName: player.name 
+    playerName: player.name
   });
 
   // Check if all players have answered
@@ -206,12 +217,12 @@ export function showAnswer(room: GameRoom, io: SocketServer): void {
     answerTime: player.answerTime,
     hasAnswered: player.currentAnswer !== null,
   }));
-  
+
   // Sort by answer time (highest = fastest, answered first) to get order
   const sortedByTime = [...playerAnswers]
     .filter(p => p.hasAnswered)
     .sort((a, b) => (b.answerTime || 0) - (a.answerTime || 0));
-  
+
   // Create order map (1 = first to answer)
   const answerOrderMap = new Map<string, number>();
   sortedByTime.forEach((entry, index) => {
@@ -219,10 +230,10 @@ export function showAnswer(room: GameRoom, io: SocketServer): void {
   });
 
   const results: AnswerResult[] = [];
-  
+
   // Track total questions
   room.state.statistics.totalQuestions++;
-  
+
   room.players.forEach((player) => {
     const correct = player.currentAnswer === question.correctIndex;
     const hasAnswered = player.currentAnswer !== null;
@@ -241,16 +252,16 @@ export function showAnswer(room: GameRoom, io: SocketServer): void {
 
     const points = basePoints + timeBonus + streakBonus;
     player.score += points;
-    
+
     // Update player statistics
     const playerStats = getOrCreatePlayerStats(room, player.id);
     if (hasAnswered) {
       playerStats.totalAnswers++;
       if (correct) playerStats.correctAnswers++;
-      
+
       // Track fastest answer and average response time
-      const responseTime = player.answerTime 
-        ? room.settings.timePerQuestion * 1000 - player.answerTime 
+      const responseTime = player.answerTime
+        ? room.settings.timePerQuestion * 1000 - player.answerTime
         : null;
       if (responseTime !== null) {
         if (playerStats.fastestAnswer === null || responseTime < playerStats.fastestAnswer) {
@@ -260,16 +271,16 @@ export function showAnswer(room: GameRoom, io: SocketServer): void {
         playerStats.totalResponseTime += responseTime;
         playerStats.responsesCount++;
       }
-      
+
       // Track longest streak
       if (player.streak > playerStats.longestStreak) {
         playerStats.longestStreak = player.streak;
       }
-      
+
       // Update category stats
       updateCategoryStats(playerStats, room.state.statistics, question.category, correct);
     }
-    
+
     results.push({
       playerId: player.id,
       playerName: player.name,
@@ -283,8 +294,8 @@ export function showAnswer(room: GameRoom, io: SocketServer): void {
       newScore: player.score,
       answer: player.currentAnswer ?? undefined,
       answerOrder: answerOrderMap.get(player.id) || null,
-      responseTimeMs: player.answerTime 
-        ? room.settings.timePerQuestion * 1000 - player.answerTime 
+      responseTimeMs: player.answerTime
+        ? room.settings.timePerQuestion * 1000 - player.answerTime
         : null,
     });
   });
@@ -320,67 +331,67 @@ export function showEstimationAnswer(room: GameRoom, io: SocketServer): void {
   if (!question || question.correctValue === undefined) return;
 
   const correctValue = question.correctValue;
-  
+
   // Collect answer times for ordering
   const playerAnswerTimes = Array.from(room.players.values())
     .filter(p => p.estimationAnswer !== null)
     .sort((a, b) => (b.answerTime || 0) - (a.answerTime || 0));
-  
+
   const answerOrderMap = new Map<string, number>();
   playerAnswerTimes.forEach((player, index) => {
     answerOrderMap.set(player.id, index + 1);
   });
-  
+
   // Calculate differences and sort (best first for results)
   const playerEstimates = Array.from(room.players.values())
     .map(p => ({
       player: p,
       estimation: p.estimationAnswer,
-      diff: p.estimationAnswer !== null 
+      diff: p.estimationAnswer !== null
         ? p.estimationAnswer - correctValue
         : null,
-      absDiff: p.estimationAnswer !== null 
-        ? Math.abs(p.estimationAnswer - correctValue) 
+      absDiff: p.estimationAnswer !== null
+        ? Math.abs(p.estimationAnswer - correctValue)
         : Infinity,
     }))
     .sort((a, b) => a.absDiff - b.absDiff);
 
   const results: AnswerResult[] = [];
-  
+
   // Accuracy-based scoring system
   const rankBonuses = [300, 200, 100];
   const baseRankBonus = 50;
   const maxAccuracyPoints = 1000;
   const perfectBonusValue = 500;
-  
+
   // Track total questions
   room.state.statistics.totalQuestions++;
-  
+
   playerEstimates.forEach((entry, index) => {
     let accuracyPoints = 0;
     let rankBonus = 0;
     let perfect = 0;
     const hasAnswered = entry.estimation !== null;
-    
+
     if (hasAnswered) {
       // Calculate percentage deviation
       const percentageOff = (entry.absDiff / Math.max(Math.abs(correctValue), 1)) * 100;
-      
+
       // Accuracy points: Linear scale
       if (percentageOff <= 100) {
         accuracyPoints = Math.round(maxAccuracyPoints * (1 - percentageOff / 100));
       } else {
         accuracyPoints = 0;
       }
-      
+
       // Rank bonus
       rankBonus = index < rankBonuses.length ? rankBonuses[index] : baseRankBonus;
-      
+
       // Perfect answer bonus
       if (entry.absDiff === 0) {
         perfect = perfectBonusValue;
       }
-      
+
       entry.player.streak++;
     } else {
       entry.player.streak = 0;
@@ -388,24 +399,24 @@ export function showEstimationAnswer(room: GameRoom, io: SocketServer): void {
 
     const points = accuracyPoints + rankBonus + perfect;
     entry.player.score += points;
-    
+
     // Update player statistics for estimation questions
     const playerStats = getOrCreatePlayerStats(room, entry.player.id);
     if (hasAnswered) {
       playerStats.totalAnswers++;
       playerStats.estimationQuestions++;
       playerStats.estimationPoints += points;
-      
+
       // Track longest streak
       if (entry.player.streak > playerStats.longestStreak) {
         playerStats.longestStreak = entry.player.streak;
       }
-      
+
       // Update category stats (count as "correct" if in top 3)
       const isGoodEstimate = index < 3;
       updateCategoryStats(playerStats, room.state.statistics, question.category, isGoodEstimate);
     }
-    
+
     results.push({
       playerId: entry.player.id,
       playerName: entry.player.name,
@@ -418,8 +429,8 @@ export function showEstimationAnswer(room: GameRoom, io: SocketServer): void {
       streak: entry.player.streak,
       newScore: entry.player.score,
       answerOrder: answerOrderMap.get(entry.player.id) || null,
-      responseTimeMs: entry.player.answerTime 
-        ? room.settings.timePerQuestion * 1000 - entry.player.answerTime 
+      responseTimeMs: entry.player.answerTime
+        ? room.settings.timePerQuestion * 1000 - entry.player.answerTime
         : null,
       estimation: entry.estimation ?? undefined,
       diff: entry.diff ?? undefined,

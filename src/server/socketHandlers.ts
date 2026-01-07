@@ -8,10 +8,10 @@
 import type { Server as SocketServer, Socket } from 'socket.io';
 import type { GameRoom, Player, GameSettings, RPSChoice } from './types';
 import { DEFAULT_GAME_SETTINGS, createInitialGameState } from './types';
-import { 
-  getRoom, 
-  setRoom, 
-  generateRoomCode, 
+import {
+  getRoom,
+  setRoom,
+  generateRoomCode,
   generatePlayerId,
   roomToClient,
   broadcastRoomUpdate,
@@ -23,6 +23,19 @@ import {
 } from './roomStore';
 import { botManager } from './botManager';
 import * as questionLoader from './questionLoader';
+
+// Socket Event Validation
+import {
+  validateSocketEvent,
+  CreateRoomSchema,
+  JoinRoomSchema,
+  VoteCategorySchema,
+  SubmitAnswerSchema,
+  SubmitEstimationSchema,
+  BonusRoundSubmitSchema,
+  EnableDevModeSchema,
+  DevCommandSchema,
+} from '@/lib/validations/socket';
 
 // Game Logic Imports
 import {
@@ -144,13 +157,20 @@ export function setupSocketHandlers(io: SocketServer): void {
 // ============================================
 
 function handleCreateRoom(socket: Socket) {
-  return (data: { playerName: string; avatarOptions?: string }, callback: (response: any) => void) => {
+  return (rawData: unknown, callback: (response: any) => void) => {
+    // Validate input
+    const data = validateSocketEvent(CreateRoomSchema, rawData, 'create_room');
+    if (!data) {
+      callback({ success: false, error: 'Ungültige Eingabe' });
+      return;
+    }
+
     const roomCode = generateRoomCode();
     const playerId = generatePlayerId();
-    
+
     // Use custom avatar options if provided, otherwise generate random seed
     const avatarSeed = data.avatarOptions || (data.playerName + Date.now());
-    
+
     const player: Player = {
       id: playerId,
       socketId: socket.id,
@@ -176,9 +196,9 @@ function handleCreateRoom(socket: Socket) {
 
     setRoom(roomCode, room);
     socket.join(roomCode);
-    
+
     console.log(`🎮 Room ${roomCode} created by ${data.playerName}`);
-    
+
     callback({
       success: true,
       roomCode,
@@ -192,7 +212,7 @@ function handleJoinRoom(socket: Socket, io: SocketServer) {
   return (data: { roomCode: string; playerName: string; avatarOptions?: string }, callback: (response: any) => void) => {
     const code = data.roomCode.toUpperCase();
     const room = getRoom(code);
-    
+
     if (!room) {
       callback({ success: false, error: 'Raum nicht gefunden' });
       return;
@@ -255,10 +275,10 @@ function handleUpdateSettings(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; settings: Partial<GameSettings> }) => {
     const room = getRoom(data.roomCode);
     if (!room) return;
-    
+
     const player = room.players.get(data.playerId);
     if (!player?.isHost) return;
-    
+
     room.settings = { ...room.settings, ...data.settings };
     broadcastRoomUpdate(room, io);
   };
@@ -268,10 +288,10 @@ function handleRerollAvatar(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'lobby') return;
-    
+
     const player = room.players.get(data.playerId);
     if (!player) return;
-    
+
     player.avatarSeed = player.name + Date.now() + Math.random().toString(36).slice(2);
     console.log(`🎲 ${player.name} rerolled avatar`);
     broadcastRoomUpdate(room, io);
@@ -282,10 +302,10 @@ function handleUpdateAvatar(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; avatarOptions: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'lobby') return;
-    
+
     const player = room.players.get(data.playerId);
     if (!player) return;
-    
+
     // Store the JSON string of options as the avatarSeed
     // This allows the client to parse it back to options
     player.avatarSeed = data.avatarOptions;
@@ -297,7 +317,7 @@ function handleUpdateAvatar(io: SocketServer) {
 function handleStartGame(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }, callback: (response: any) => void) => {
     const room = getRoom(data.roomCode);
-    
+
     if (!room) {
       callback({ success: false, error: 'Raum nicht gefunden' });
       return;
@@ -345,7 +365,7 @@ function handleDiceRoyaleRollEvent(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'category_dice_royale') return;
-    
+
     handleDiceRoyaleRoll(room, io, data.playerId);
   };
 }
@@ -354,7 +374,7 @@ function handleDiceRoyalePickEvent(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; categoryId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'category_dice_royale') return;
-    
+
     const royale = room.state.diceRoyale;
     if (!royale || royale.phase !== 'result') return;
     if (data.playerId !== royale.winnerId) return;
@@ -367,7 +387,7 @@ function handleRPSChoiceEvent(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; choice: RPSChoice }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'category_rps_duel') return;
-    
+
     handleRPSChoice(room, io, data.playerId, data.choice);
   };
 }
@@ -376,7 +396,7 @@ function handleRPSDuelPickEvent(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; categoryId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'category_rps_duel') return;
-    
+
     const duel = room.state.rpsDuel;
     if (!duel || duel.phase !== 'result') return;
     if (data.playerId !== duel.winnerId) return;
@@ -389,7 +409,7 @@ function handleSubmitAnswer(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; answerIndex: number }) => {
     const room = getRoom(data.roomCode);
     if (!room) return;
-    
+
     handleAnswer(room, io, data.playerId, data.answerIndex);
   };
 }
@@ -398,7 +418,7 @@ function handleSubmitEstimation(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; value: number }) => {
     const room = getRoom(data.roomCode);
     if (!room) return;
-    
+
     handleEstimation(room, io, data.playerId, data.value);
   };
 }
@@ -407,17 +427,17 @@ function handleBonusRoundSubmit(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; answer: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
-    
+
     const bonusRound = room.state.bonusRound;
     if (!bonusRound) return;
-    
+
     // Collective List: Only current turn player can answer
     if (bonusRound.type === 'collective_list') {
       if (bonusRound.phase !== 'playing') return;
       const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
       if (data.playerId !== currentPlayerId) return;
     }
-    
+
     handleBonusRoundAnswer(room, io, data.playerId, data.answer);
   };
 }
@@ -426,13 +446,13 @@ function handleBonusRoundSkipEvent(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
-    
+
     const bonusRound = room.state.bonusRound;
     if (!bonusRound || bonusRound.type !== 'collective_list' || bonusRound.phase !== 'playing') return;
-    
+
     const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
     if (data.playerId !== currentPlayerId) return;
-    
+
     handleBonusRoundSkip(room, io, data.playerId);
   };
 }
@@ -441,10 +461,10 @@ function handleHotButtonBuzz(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
-    
+
     const bonusRound = room.state.bonusRound;
     if (!bonusRound || bonusRound.type !== 'hot_button') return;
-    
+
     handleBonusRoundBuzz(room, io, data.playerId);
   };
 }
@@ -453,10 +473,10 @@ function handleHotButtonSubmit(io: SocketServer) {
   return (data: { roomCode: string; playerId: string; answer: string }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
-    
+
     const bonusRound = room.state.bonusRound;
     if (!bonusRound || bonusRound.type !== 'hot_button') return;
-    
+
     handleBonusRoundAnswer(room, io, data.playerId, data.answer);
   };
 }
@@ -465,7 +485,7 @@ function handleVoteRematch(socket: Socket, io: SocketServer) {
   return (data: { roomCode: string; playerId: string; vote: 'yes' | 'no' }) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'rematch_voting') return;
-    
+
     handleRematchVote(room, io, data.playerId, data.vote, socket);
   };
 }
@@ -474,7 +494,7 @@ function handleNext(io: SocketServer) {
   return (data: { roomCode: string; playerId: string }) => {
     const room = getRoom(data.roomCode);
     if (!room) return;
-    
+
     const player = room.players.get(data.playerId);
     if (!player?.isHost) return;
 
@@ -487,15 +507,25 @@ function handleNext(io: SocketServer) {
 }
 
 function handleEnableDevMode(io: SocketServer) {
-  return (data: { roomCode: string; playerId: string; secretCode: string }) => {
+  return (rawData: unknown) => {
+    // Validate input
+    const data = validateSocketEvent(EnableDevModeSchema, rawData, 'enable_dev_mode');
+    if (!data) return;
+
     const room = getRoom(data.roomCode);
     if (!room) return;
 
     const player = room.players.get(data.playerId);
     if (!player?.isHost) return;
 
-    // Check secret code
-    if (data.secretCode === 'clairobscur99') {
+    // Check secret code from environment variable
+    const devModeSecret = process.env.DEV_MODE_SECRET;
+    if (!devModeSecret) {
+      console.warn('⚠️ DEV_MODE_SECRET not configured in environment');
+      return;
+    }
+
+    if (data.secretCode === devModeSecret) {
       room.devModeEnabled = true;
       console.log(`🔓 Dev mode enabled for room ${room.code} via secret code`);
       io.to(room.code).emit('dev_mode_enabled');
@@ -520,8 +550,8 @@ function handleDevCommand(io: SocketServer) {
     switch (data.command) {
       case 'force_category_mode': {
         room.forcedCategoryMode = data.params?.mode;
-        io.to(room.code).emit('dev_notification', { 
-          message: `Nächster Modus: ${data.params?.mode}` 
+        io.to(room.code).emit('dev_notification', {
+          message: `Nächster Modus: ${data.params?.mode}`
         });
         break;
       }
@@ -530,7 +560,7 @@ function handleDevCommand(io: SocketServer) {
         const botId = generatePlayerId();
         const botNames = ['🤖 Bot-Alex', '🤖 Bot-Sam', '🤖 Bot-Max', '🤖 Bot-Kim', '🤖 Bot-Jo'];
         const botName = botNames[room.players.size % botNames.length];
-        
+
         const bot: Player = {
           id: botId,
           socketId: 'bot-' + botId,
@@ -544,10 +574,10 @@ function handleDevCommand(io: SocketServer) {
           answerTime: null,
           streak: 0,
         };
-        
+
         room.players.set(botId, bot);
         botManager.registerBot(botId, data.roomCode, botName);
-        
+
         broadcastRoomUpdate(room, io);
         io.to(room.code).emit('dev_notification', { message: `${botName} hinzugefügt` });
         break;
@@ -644,10 +674,10 @@ function handleDevCommand(io: SocketServer) {
         room.settings.questionsPerRound = 999;
         room.state.currentRound = 1;
         room.state.currentQuestionIndex = 0;
-        
+
         // Clear used questions to get fresh pool
         room.state.usedQuestionIds.clear();
-        
+
         // Load questions from selected category
         const questions = await getQuestionsForRoom(room, categorySlug, 50);
         if (questions.length === 0) {
@@ -657,17 +687,17 @@ function handleDevCommand(io: SocketServer) {
 
         room.state.roundQuestions = questions;
         room.state.selectedCategory = categorySlug;
-        
+
         // Mark room as endless mode (can be used for UI)
         room.isEndlessMode = true;
         room.endlessCategoryId = categorySlug;
 
         // Start first question
         startQuestion(room, io);
-        
+
         const categoryName = questions[0]?.category || categorySlug;
-        io.to(room.code).emit('dev_notification', { 
-          message: `♾️ Endlosrunde gestartet: ${categoryName} (${questions.length} Fragen)` 
+        io.to(room.code).emit('dev_notification', {
+          message: `♾️ Endlosrunde gestartet: ${categoryName} (${questions.length} Fragen)`
         });
         break;
       }
@@ -675,27 +705,27 @@ function handleDevCommand(io: SocketServer) {
       case 'pause_game': {
         // Pause the game timer
         if (room.isPaused) break;
-        
+
         room.isPaused = true;
         room.pausedAt = Date.now();
-        
+
         // Calculate remaining time
         if (room.state.timerEnd) {
           room.remainingTime = Math.max(0, room.state.timerEnd - Date.now());
         }
-        
+
         // Clear any existing timer
         if (room.questionTimer) {
           clearTimeout(room.questionTimer);
           room.questionTimer = undefined;
         }
-        
+
         // Also pause bonus round timer if active (only for Collective List)
         if (room.state.bonusRound?.type === 'collective_list' && room.state.bonusRound.currentTurnTimer) {
           clearTimeout(room.state.bonusRound.currentTurnTimer);
           room.state.bonusRound.currentTurnTimer = null;
         }
-        
+
         io.to(room.code).emit('game_paused', { paused: true });
         io.to(room.code).emit('dev_notification', { message: '⏸️ Spiel pausiert' });
         console.log(`⏸️ Game paused in room ${room.code}`);
@@ -705,13 +735,13 @@ function handleDevCommand(io: SocketServer) {
       case 'resume_game': {
         // Resume the game timer
         if (!room.isPaused) break;
-        
+
         room.isPaused = false;
-        
+
         // Restore timer with remaining time
         if (room.remainingTime && room.remainingTime > 0) {
           room.state.timerEnd = Date.now() + room.remainingTime;
-          
+
           // Re-schedule the timeout
           room.questionTimer = setTimeout(() => {
             if (room.state.phase === 'question') {
@@ -721,7 +751,7 @@ function handleDevCommand(io: SocketServer) {
             }
           }, room.remainingTime);
         }
-        
+
         // Resume bonus round timer if active
         if (room.state.bonusRound && room.state.phase === 'bonus_round') {
           const bonusRound = room.state.bonusRound;
@@ -733,10 +763,10 @@ function handleDevCommand(io: SocketServer) {
             }, room.remainingTime);
           }
         }
-        
+
         room.pausedAt = undefined;
         room.remainingTime = undefined;
-        
+
         io.to(room.code).emit('game_paused', { paused: false });
         broadcastRoomUpdate(room, io);
         io.to(room.code).emit('dev_notification', { message: '▶️ Spiel fortgesetzt' });
@@ -775,12 +805,12 @@ function handleReconnect(socket: Socket, io: SocketServer) {
 function handleDisconnect(socket: Socket, io: SocketServer) {
   return () => {
     console.log(`🔌 Disconnected: ${socket.id}`);
-    
+
     // Find the room and player for this socket
     let foundRoom: GameRoom | undefined;
     let foundPlayer: Player | undefined;
     let roomCode: string | undefined;
-    
+
     // Iterate through ALL rooms to find the player by socketId
     // (socket.rooms might already be empty at disconnect time)
     forEachRoom((room, code) => {
@@ -792,15 +822,15 @@ function handleDisconnect(socket: Socket, io: SocketServer) {
         }
       });
     });
-    
+
     if (foundRoom && foundPlayer && roomCode) {
       console.log(`👋 Player ${foundPlayer.name} disconnected from room ${roomCode}`);
       foundPlayer.isConnected = false;
-      
+
       // Handle host transfer
       if (foundPlayer.isHost) {
         const newHost = getConnectedPlayers(foundRoom).find(p => p.id !== foundPlayer!.id);
-        
+
         if (newHost) {
           foundPlayer.isHost = false;
           newHost.isHost = true;
@@ -808,10 +838,10 @@ function handleDisconnect(socket: Socket, io: SocketServer) {
           io.to(roomCode).emit('host_changed', { newHostId: newHost.id });
         }
       }
-      
-      io.to(roomCode).emit('player_disconnected', { 
-        playerId: foundPlayer.id, 
-        playerName: foundPlayer.name 
+
+      io.to(roomCode).emit('player_disconnected', {
+        playerId: foundPlayer.id,
+        playerName: foundPlayer.name
       });
       broadcastRoomUpdate(foundRoom, io);
 
@@ -831,14 +861,14 @@ function handleDisconnect(socket: Socket, io: SocketServer) {
 function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, disconnectedPlayerId: string): void {
   const phase = room.state.phase;
   const connectedPlayers = getConnectedPlayers(room);
-  
+
   // Wenn keine Spieler mehr da sind, nichts zu tun
   if (connectedPlayers.length === 0) return;
-  
+
   switch (phase) {
     case 'category_voting': {
       // Prüfen ob alle verbundenen Spieler gevotet haben
-      const connectedVoteCount = connectedPlayers.filter(p => 
+      const connectedVoteCount = connectedPlayers.filter(p =>
         room.state.categoryVotes.has(p.id)
       ).length;
       if (connectedVoteCount >= connectedPlayers.length) {
@@ -847,7 +877,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'question': {
       // Prüfen ob alle verbundenen Spieler geantwortet haben
       const allAnswered = connectedPlayers.every(p => p.currentAnswer !== null);
@@ -858,7 +888,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'estimation': {
       // Prüfen ob alle verbundenen Spieler geschätzt haben
       const allEstimated = connectedPlayers.every(p => p.estimationAnswer !== null);
@@ -869,7 +899,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'category_dice_royale': {
       // Prüfen ob alle verbundenen Spieler gewürfelt haben
       const royale = room.state.diceRoyale;
@@ -887,7 +917,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'category_losers_pick': {
       // Wenn der Loser disconnected ist, wähle zufällig
       if (room.state.loserPickPlayerId === disconnectedPlayerId) {
@@ -901,7 +931,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'category_rps_duel': {
       // Wenn ein Duellant disconnected, gewinnt der andere
       const duel = room.state.rpsDuel;
@@ -909,11 +939,11 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
         const winnerId = duel.player1Id === disconnectedPlayerId ? duel.player2Id : duel.player1Id;
         const winner = room.players.get(winnerId);
         console.log(`✊✌️✋ RPS Duel player disconnected, ${winner?.name} wins by default`);
-        
+
         duel.winnerId = winnerId;
         duel.phase = 'result';
         room.state.loserPickPlayerId = winnerId;
-        
+
         io.to(room.code).emit('rps_duel_winner', {
           winnerId,
           winnerName: winner?.name,
@@ -922,7 +952,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
           byDefault: true,
         });
         broadcastRoomUpdate(room, io);
-        
+
         // Let winner pick after delay
         const roomCode = room.code;
         setTimeout(() => {
@@ -934,7 +964,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'bonus_round': {
       // Wenn der aktive Spieler disconnected, überspringe ihn
       const bonusRound = room.state.bonusRound;
@@ -960,11 +990,11 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
       }
       break;
     }
-    
+
     case 'rematch_voting': {
       // Disconnected während Rematch-Voting = automatisch "no"
       room.state.rematchVotes.set(disconnectedPlayerId, 'no');
-      
+
       // Check if all connected have voted
       const allVoted = connectedPlayers.every(p => room.state.rematchVotes.has(p.id));
       if (allVoted) {
@@ -983,7 +1013,7 @@ function checkPhaseProgressAfterDisconnect(room: GameRoom, io: SocketServer, dis
 
 function setupBotHandlers(io: SocketServer) {
   botManager.initialize(io, (code) => getRoom(code));
-  
+
   botManager.registerActionHandler('vote_category', (data) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'category_voting') return;
@@ -1103,13 +1133,13 @@ function setupBotHandlers(io: SocketServer) {
     if (!room || room.state.phase !== 'bonus_round') return;
     const bonusRound = room.state.bonusRound;
     if (!bonusRound) return;
-    
+
     if (bonusRound.type === 'collective_list') {
       if (bonusRound.phase !== 'playing') return;
       const currentPlayerId = bonusRound.activePlayers[bonusRound.currentTurnIndex % bonusRound.activePlayers.length];
       if (data.playerId !== currentPlayerId) return;
     }
-    
+
     handleBonusRoundAnswer(room, io, data.playerId, data.answer);
   });
 
@@ -1122,7 +1152,7 @@ function setupBotHandlers(io: SocketServer) {
     if (data.playerId !== currentPlayerId) return;
     handleBonusRoundSkip(room, io, data.playerId);
   });
-  
+
   botManager.registerActionHandler('hot_button_buzz', (data) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
@@ -1130,7 +1160,7 @@ function setupBotHandlers(io: SocketServer) {
     if (!bonusRound || bonusRound.type !== 'hot_button') return;
     handleBonusRoundBuzz(room, io, data.playerId);
   });
-  
+
   botManager.registerActionHandler('hot_button_submit', (data) => {
     const room = getRoom(data.roomCode);
     if (!room || room.state.phase !== 'bonus_round') return;
