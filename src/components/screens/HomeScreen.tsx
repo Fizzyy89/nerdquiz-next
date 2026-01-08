@@ -218,6 +218,7 @@ export function HomeScreen() {
           placeholder="z.B. QuizMaster"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && name.trim() && handleCreate()}
           className="bg-zinc-900 border-zinc-800 h-12 text-lg focus-visible:ring-violet-500"
           autoFocus={isDesktop}
         />
@@ -244,6 +245,7 @@ export function HomeScreen() {
             placeholder="Spielername"
             value={name}
             onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && name.trim() && roomCode.length === 4 && handleJoin()}
             className="bg-zinc-900 border-zinc-800 h-14"
             autoFocus={isDesktop}
           />
@@ -253,6 +255,7 @@ export function HomeScreen() {
           <Input
             value={roomCode}
             onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+            onKeyDown={(e) => e.key === 'Enter' && name.trim() && roomCode.length === 4 && handleJoin()}
             placeholder="ABCD"
             maxLength={4}
             className="bg-zinc-900 border-zinc-800 h-14 text-center font-mono text-2xl tracking-widest uppercase focus-visible:ring-emerald-500"
