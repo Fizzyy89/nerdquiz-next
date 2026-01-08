@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion, AnimatePresence, useInView } from 'framer-motion';
+import { motion, AnimatePresence, useScroll, useTransform, useInView } from 'framer-motion';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore } from '@/store/gameStore';
 import { loadSession, clearSession, type GameSession } from '@/lib/session';
@@ -15,108 +15,160 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
-import { 
-  Zap, 
-  Users, 
-  ArrowRight, 
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerFooter,
+} from '@/components/ui/drawer';
+import { useMediaQuery } from '@/hooks/use-media-query';
+import {
+  Zap,
+  Users,
+  ArrowRight,
   Loader2,
-  Sparkles,
   Trophy,
   Brain,
   RotateCcw,
   X,
   Gamepad2,
   Timer,
-  Target,
-  Crown,
-  Play,
-  BookOpen,
-  Newspaper,
-  Dice5,
-  Heart,
-  ChevronRight,
-  Clock,
-  Flame
+  Swords,
+  Dices,
+  Flame,
+  ListOrdered,
+  Sparkles,
+  Music,
+  Tv,
+  Film,
+  Globe,
+  Beaker,
+  Car,
+  Dumbbell,
+  Book,
+  Smartphone,
+  Crown
 } from 'lucide-react';
+import Image from 'next/image';
 
-// Category data with icons
+// --- DATA ---
+
 const CATEGORIES = [
-  { name: 'Gaming', icon: '🎮', color: 'from-purple-500 to-indigo-600' },
-  { name: 'Filme & Serien', icon: '🎬', color: 'from-red-500 to-pink-600' },
-  { name: 'Anime & Manga', icon: '🌸', color: 'from-pink-400 to-rose-500' },
-  { name: 'Star Wars', icon: '⚔️', color: 'from-yellow-500 to-orange-600' },
-  { name: 'Marvel', icon: '🦸', color: 'from-red-600 to-red-800' },
-  { name: 'Harry Potter', icon: '⚡', color: 'from-amber-500 to-yellow-600' },
-  { name: 'Herr der Ringe', icon: '💍', color: 'from-emerald-600 to-teal-700' },
-  { name: 'Musik', icon: '🎵', color: 'from-violet-500 to-purple-600' },
-  { name: 'Wissenschaft', icon: '🔬', color: 'from-cyan-500 to-blue-600' },
-  { name: 'Technik', icon: '💻', color: 'from-slate-500 to-zinc-600' },
-  { name: 'Sport', icon: '⚽', color: 'from-green-500 to-emerald-600' },
-  { name: 'Mythologie', icon: '🏛️', color: 'from-amber-600 to-orange-700' },
-  { name: 'Internet & Memes', icon: '🌐', color: 'from-blue-500 to-cyan-500' },
-  { name: 'Cartoons', icon: '📺', color: 'from-orange-400 to-yellow-500' },
-  { name: 'Fahrzeuge', icon: '🚗', color: 'from-gray-500 to-slate-600' },
-  { name: 'Allgemeinwissen', icon: '📚', color: 'from-indigo-500 to-blue-600' },
+  { name: 'Gaming', icon: Gamepad2, color: 'from-violet-500 to-purple-600' },
+  { name: 'Filme & Serien', icon: Film, color: 'from-red-500 to-rose-600' },
+  { name: 'Anime & Manga', icon: Sparkles, color: 'from-pink-400 to-rose-500' },
+  { name: 'Star Wars', icon: Swords, color: 'from-yellow-400 to-orange-500' },
+  { name: 'Marvel', icon: Zap, color: 'from-red-600 to-red-800' },
+  { name: 'Harry Potter', icon: Sparkles, color: 'from-amber-400 to-orange-600' },
+  { name: 'Herr der Ringe', icon: Crown, color: 'from-yellow-500 to-amber-700' },
+  { name: 'Musik', icon: Music, color: 'from-cyan-400 to-blue-500' },
+  { name: 'Wissenschaft', icon: Beaker, color: 'from-emerald-400 to-teal-600' },
+  { name: 'Technik', icon: Smartphone, color: 'from-slate-400 to-slate-600' },
+  { name: 'Allgemeinwissen', icon: Brain, color: 'from-blue-500 to-indigo-600' },
+  { name: 'Mythologie', icon: Book, color: 'from-orange-300 to-amber-500' },
+  { name: 'Fahrzeuge', icon: Car, color: 'from-orange-400 to-red-500' },
+  { name: 'Sport', icon: Dumbbell, color: 'from-green-500 to-emerald-600' },
+  { name: 'Internet & Memes', icon: Globe, color: 'from-blue-400 to-cyan-500' },
+  { name: 'Cartoons', icon: Tv, color: 'from-yellow-400 to-amber-500' },
 ];
 
-// Mock news data
-const NEWS_ITEMS = [
+const FEATURES = [
   {
-    id: 1,
-    date: '26. Dez 2024',
-    title: 'NerdQuiz ist live! 🎉',
-    description: 'Das ultimative Quiz-Spiel für Nerds ist endlich online.',
-    tag: 'Neu',
-    tagColor: 'bg-primary'
+    title: "Live Multiplayer",
+    desc: "Spiele mit bis zu 12 Freunden gleichzeitig in Echtzeit.",
+    icon: Users,
+    color: "bg-blue-500/10 text-blue-500"
   },
   {
-    id: 2,
-    date: '20. Dez 2024',
-    title: 'Neue Kategorien hinzugefügt',
-    description: 'Mythologie und Internet Memes sind jetzt verfügbar.',
-    tag: 'Update',
-    tagColor: 'bg-secondary'
+    title: "17 Kategorien",
+    desc: "Von Allgemeinwissen bis Nerd-Spezialwissen.",
+    icon: Brain,
+    color: "bg-purple-500/10 text-purple-500"
   },
   {
-    id: 3,
-    date: '15. Dez 2024',
-    title: 'Dice Duel Feature',
-    description: 'Der neue Würfel-Modus für Kategorie-Duelle ist da!',
-    tag: 'Feature',
-    tagColor: 'bg-accent'
+    title: "Bonus Runden",
+    desc: "Abwechslung durch Hot Button & Collective List.",
+    icon: StarBadge, // Helper component defined below
+    color: "bg-amber-500/10 text-amber-500"
   },
+  {
+    title: "Minigames",
+    desc: "Klär Unentschieden im Dice Royale oder RPS Duell.",
+    icon: Dices,
+    color: "bg-emerald-500/10 text-emerald-500"
+  }
 ];
 
-// Animated section wrapper
-function AnimatedSection({ children, className = '', delay = 0, id }: { children: React.ReactNode; className?: string; delay?: number; id?: string }) {
-  const ref = useRef(null);
-  const isInView = useInView(ref, { once: true, margin: '-50px' });
-  
+const BONUS_ROUNDS = [
+  {
+    id: 'hot-button',
+    title: 'Hot Button',
+    subtitle: 'Schnelligkeit ist alles',
+    desc: 'Buzzer dich als Erster rein! Aber Vorsicht: Falsche Antworten kosten Punkte.',
+    gradient: 'from-red-500/20 via-orange-500/20 to-red-500/20',
+    border: 'border-red-500/30',
+    icon: Flame
+  },
+  {
+    id: 'collective',
+    title: 'Collective List',
+    subtitle: 'Teamwork gefragt',
+    desc: 'Findet gemeinsam alle Elemente einer Liste. Wie viele Pokémon kennt ihr?',
+    gradient: 'from-blue-500/20 via-cyan-500/20 to-blue-500/20',
+    border: 'border-blue-500/30',
+    icon: ListOrdered
+  }
+];
+
+// --- HELPER COMPONENTS ---
+
+function StarBadge({ className }: { className?: string }) {
   return (
-    <motion.section
-      ref={ref}
-      id={id}
-      initial={{ opacity: 0, y: 30 }}
-      animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 30 }}
-      transition={{ duration: 0.5, delay, ease: 'easeOut' }}
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
       className={className}
     >
-      {children}
-    </motion.section>
+      <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+    </svg>
   );
 }
+
+function GridBackground() {
+  return (
+    <div className="absolute inset-0 -z-10 overflow-hidden">
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#80808012_1px,transparent_1px),linear-gradient(to_bottom,#80808012_1px,transparent_1px)] bg-[size:32px_32px]"></div>
+      <div className="absolute top-0 left-0 right-0 h-[500px] bg-gradient-to-b from-violet-500/10 via-transparent to-transparent blur-3xl" />
+      <div className="absolute bottom-0 left-0 right-0 h-[300px] bg-gradient-to-t from-background to-transparent" />
+    </div>
+  );
+}
+
+// --- MAIN PAGE ---
 
 export function HomeScreen() {
   const router = useRouter();
   const { createRoom, joinRoom } = useSocket();
   const isConnected = useGameStore((s) => s.isConnected);
-  
+
   const [dialogMode, setDialogMode] = useState<'none' | 'create' | 'join'>('none');
   const [name, setName] = useState('');
   const [roomCode, setRoomCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [existingSession, setExistingSession] = useState<GameSession | null>(null);
+  const isDesktop = useMediaQuery("(min-width: 768px)");
+
+  // Parallax / Scroll Effects
+  const { scrollY } = useScroll();
+  const heroY = useTransform(scrollY, [0, 500], [0, 200]);
+  const heroOpacity = useTransform(scrollY, [0, 300], [1, 0]);
 
   useEffect(() => {
     const session = loadSession();
@@ -132,47 +184,24 @@ export function HomeScreen() {
   };
 
   const handleRejoin = () => {
-    if (existingSession) {
-      router.push(`/room/${existingSession.roomCode}`);
-    }
+    if (existingSession) router.push(`/room/${existingSession.roomCode}`);
   };
 
   const handleCreate = async () => {
-    if (!name.trim()) {
-      setError('Bitte gib deinen Namen ein');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    
+    if (!name.trim()) return setError('Name wird benötigt');
+    setLoading(true); setError(null);
     const result = await createRoom(name.trim());
-    if (result.success && result.roomCode) {
-      router.push(`/room/${result.roomCode}`);
-    } else {
-      setError(result.error || 'Fehler beim Erstellen');
-      setLoading(false);
-    }
+    if (result.success && result.roomCode) router.push(`/room/${result.roomCode}`);
+    else { setError(result.error || 'Fehler beim Erstellen'); setLoading(false); }
   };
 
   const handleJoin = async () => {
-    if (!name.trim()) {
-      setError('Bitte gib deinen Namen ein');
-      return;
-    }
-    if (roomCode.length !== 4) {
-      setError('Code muss 4 Zeichen haben');
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    
+    if (!name.trim()) return setError('Name wird benötigt');
+    if (roomCode.length !== 4) return setError('Code muss 4 Zeichen haben');
+    setLoading(true); setError(null);
     const result = await joinRoom(roomCode.toUpperCase(), name.trim());
-    if (result.success) {
-      router.push(`/room/${roomCode.toUpperCase()}`);
-    } else {
-      setError(result.error || 'Fehler beim Beitreten');
-      setLoading(false);
-    }
+    if (result.success) router.push(`/room/${roomCode.toUpperCase()}`);
+    else { setError(result.error || 'Fehler beim Beitreten'); setLoading(false); }
   };
 
   const closeDialog = () => {
@@ -181,647 +210,405 @@ export function HomeScreen() {
     setLoading(false);
   };
 
-  const scrollToSection = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const createForm = (
+    <div className="space-y-4 py-4">
+      <div className="space-y-2">
+        <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dein Name</label>
+        <Input
+          placeholder="z.B. QuizMaster"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          className="bg-zinc-900 border-zinc-800 h-12 text-lg focus-visible:ring-violet-500"
+          autoFocus={isDesktop}
+        />
+      </div>
+
+      {error && <p className="text-sm text-red-400 bg-red-400/10 p-2 rounded">{error}</p>}
+
+      <Button
+        className="w-full h-12 text-lg font-bold bg-violet-600 hover:bg-violet-500"
+        onClick={handleCreate}
+        disabled={loading || !name.trim()}
+      >
+        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Lobby öffnen'}
+      </Button>
+    </div>
+  );
+
+  const joinForm = (
+    <div className="space-y-4 py-4">
+      <div className="grid grid-cols-5 gap-4">
+        <div className="col-span-3 space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Dein Name</label>
+          <Input
+            placeholder="Spielername"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="bg-zinc-900 border-zinc-800 h-14"
+            autoFocus={isDesktop}
+          />
+        </div>
+        <div className="col-span-2 space-y-2">
+          <label className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Code</label>
+          <Input
+            value={roomCode}
+            onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
+            placeholder="ABCD"
+            maxLength={4}
+            className="bg-zinc-900 border-zinc-800 h-14 text-center font-mono text-2xl tracking-widest uppercase focus-visible:ring-emerald-500"
+          />
+        </div>
+      </div>
+
+      {error && <p className="text-sm text-red-400 bg-red-400/10 p-2 rounded">{error}</p>}
+
+      <Button
+        className="w-full h-12 text-lg font-bold bg-emerald-600 hover:bg-emerald-500"
+        onClick={handleJoin}
+        disabled={loading || !name.trim() || roomCode.length !== 4}
+      >
+        {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Beitreten'}
+      </Button>
+    </div>
+  );
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
-      {/* Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border/40">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex items-center justify-between h-14">
-            {/* Logo */}
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center shadow-lg shadow-primary/20">
-                <Brain className="w-4 h-4 text-primary-foreground" />
-              </div>
-              <span className="font-bold text-base tracking-tight">
-                <span className="text-primary">Nerd</span>Quiz
-              </span>
-            </div>
-            
-            {/* Desktop Nav Links */}
-            <div className="hidden md:flex items-center gap-1">
-              {[
-                { label: 'Features', id: 'features' },
-                { label: 'Kategorien', id: 'categories' },
-                { label: 'News', id: 'news' },
-              ].map((link) => (
-                <button
-                  key={link.id}
-                  onClick={() => scrollToSection(link.id)}
-                  className="px-3 py-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 rounded-md transition-colors"
-                >
-                  {link.label}
-                </button>
-              ))}
-            </div>
+    <div className="min-h-screen relative bg-background text-foreground overflow-x-hidden selection:bg-primary/30">
+      <GridBackground />
 
-            {/* CTA Buttons */}
-            <div className="flex items-center gap-2">
-              {!isConnected && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-500 text-xs">
-                  <Loader2 className="w-3 h-3 animate-spin" />
-                  <span className="hidden sm:inline">Verbinde...</span>
-                </div>
-              )}
-              <Button
-                onClick={() => setDialogMode('join')}
-                disabled={!isConnected}
-                variant="ghost"
-                size="sm"
-                className="hidden sm:flex text-muted-foreground hover:text-foreground"
-              >
-                Code eingeben
-              </Button>
-              <Button
-                onClick={() => setDialogMode('create')}
-                disabled={!isConnected}
-                size="sm"
-                className="bg-primary hover:bg-primary/90 text-primary-foreground font-medium shadow-md shadow-primary/20"
-              >
-                <Play className="w-3.5 h-3.5 mr-1.5" />
-                Spielen
-              </Button>
+      {/* --- NAVBAR --- */}
+      <nav className="fixed top-0 inset-x-0 z-50 border-b border-white/5 bg-background/60 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-violet-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
+              <Brain className="w-5 h-5 text-white" />
+            </div>
+            <span className="font-bold text-lg tracking-tight">Nerd<span className="text-violet-400">Battle</span></span>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium transition-colors ${isConnected ? 'bg-emerald-500/10 text-emerald-500' : 'bg-amber-500/10 text-amber-500'}`}>
+              {isConnected ? <Zap className="w-3 h-3" /> : <Loader2 className="w-3 h-3 animate-spin" />}
+              <span className="hidden sm:inline">{isConnected ? 'Server Online' : 'Verbinde...'}</span>
             </div>
           </div>
         </div>
       </nav>
 
-      {/* Existing Session Banner */}
+      {/* --- SESSION RESTORE --- */}
       <AnimatePresence>
         {existingSession && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            className="bg-primary/5 border-b border-primary/20"
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -50, opacity: 0 }}
+            className="fixed bottom-6 right-6 z-40 max-w-sm w-full"
           >
-            <div className="max-w-6xl mx-auto px-4 py-2.5 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-2 text-sm">
-                <RotateCcw className="w-4 h-4 text-primary" />
-                <span>
-                  Laufendes Spiel: <span className="font-mono font-bold text-primary">{existingSession.roomCode}</span>
-                </span>
+            <div className="bg-card/95 backdrop-blur border border-border p-4 rounded-xl shadow-2xl flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs text-muted-foreground uppercase font-bold tracking-wider mb-0.5">Laufendes Spiel</p>
+                <p className="text-sm font-medium">Raum <span className="font-mono text-primary">{existingSession.roomCode}</span> fortsetzen?</p>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={handleRejoin} size="sm" variant="default" className="h-7 text-xs">
-                  Fortsetzen
-                </Button>
-                <button onClick={handleDismissSession} className="p-1 rounded hover:bg-muted/50 text-muted-foreground">
-                  <X className="w-3.5 h-3.5" />
-                </button>
+                <Button size="sm" onClick={handleRejoin}>Ja, weiter</Button>
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleDismissSession}><X className="w-4 h-4" /></Button>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Hero Section - Compact */}
-      <section className="relative pt-8 pb-12 md:pt-12 md:pb-16 px-4 overflow-hidden">
-        {/* Subtle background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] bg-primary/5 rounded-full blur-3xl" />
-        
-        <div className="relative max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-8 lg:gap-12 items-center">
-            {/* Left: Text Content */}
-            <div className="text-center lg:text-left">
-              <motion.div
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5 }}
-              >
-                {/* Badge */}
-                <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 border border-primary/20 text-xs font-medium text-primary mb-4">
-                  <Sparkles className="w-3 h-3" />
-                  Multiplayer Quiz-Spiel
-                </div>
-                
-                {/* Title */}
-                <h1 className="text-3xl sm:text-4xl md:text-5xl font-black tracking-tight mb-3">
-                  Das Quiz für{' '}
-                  <span className="text-primary">echte Nerds</span>
-                </h1>
-                
-                {/* Subtitle */}
-                <p className="text-muted-foreground text-base md:text-lg mb-6 max-w-lg mx-auto lg:mx-0">
-                  17 Kategorien von Gaming bis Wissenschaft. 
-                  Fordere deine Freunde heraus und beweise dein Wissen!
-                </p>
+      {/* --- HERO SECTION --- */}
+      <section className="relative pt-32 pb-20 lg:pt-48 lg:pb-32 px-4 max-w-7xl mx-auto flex flex-col items-center text-center">
+        <motion.div
+          style={{ y: heroY, opacity: heroOpacity }}
+          className="space-y-8 max-w-4xl"
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300 text-sm font-medium"
+          >
+            <Sparkles className="w-4 h-4" />
+            <span>Jetzt mit neuen Bonus Runden!</span>
+          </motion.div>
 
-                {/* CTA Buttons */}
-                <div className="flex flex-col sm:flex-row gap-3 justify-center lg:justify-start mb-6">
-                  <Button
-                    onClick={() => setDialogMode('create')}
-                    disabled={!isConnected}
-                    size="lg"
-                    className="h-11 px-6 font-semibold bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
-                  >
-                    <Zap className="w-4 h-4 mr-2" />
-                    Neues Spiel starten
-                  </Button>
-                  <Button
-                    onClick={() => setDialogMode('join')}
-                    disabled={!isConnected}
-                    variant="outline"
-                    size="lg"
-                    className="h-11 px-6 font-semibold"
-                  >
-                    <Users className="w-4 h-4 mr-2" />
-                    Raum beitreten
-                  </Button>
-                </div>
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="text-5xl sm:text-7xl lg:text-8xl font-black tracking-tight leading-[0.9]"
+          >
+            Das ultimative <br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 via-fuchsia-400 to-indigo-400">
+              Nerd Battle
+            </span>
+          </motion.h1>
 
-                {/* Quick Stats */}
-                <div className="flex items-center justify-center lg:justify-start gap-6 text-sm">
-                  {[
-                    { icon: Users, label: '2-12 Spieler' },
-                    { icon: Clock, label: '~15 Min' },
-                    { icon: Trophy, label: 'Kostenlos' },
-                  ].map((stat) => (
-                    <div key={stat.label} className="flex items-center gap-1.5 text-muted-foreground">
-                      <stat.icon className="w-4 h-4 text-primary/70" />
-                      <span>{stat.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </motion.div>
-            </div>
+          <motion.p
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="text-lg sm:text-xl text-muted-foreground max-w-2xl mx-auto"
+          >
+            Beweise dein Wissen in <strong>17 Kategorien</strong>.
+            Vom klassischen Quiz bis zu nervenaufreibenden Bonus-Runden.
+            Komplett kostenlos & Open Source.
+          </motion.p>
 
-            {/* Right: Feature Cards Preview */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ duration: 0.5, delay: 0.2 }}
-              className="hidden lg:block"
-            >
-              <div className="grid grid-cols-2 gap-3">
-                {[
-                  { icon: '🎮', label: 'Gaming', players: '2.4k' },
-                  { icon: '🎬', label: 'Filme', players: '1.8k' },
-                  { icon: '⚔️', label: 'Star Wars', players: '1.2k' },
-                  { icon: '🦸', label: 'Marvel', players: '980' },
-                ].map((cat, i) => (
-                  <motion.div
-                    key={cat.label}
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ delay: 0.3 + i * 0.1 }}
-                    className="p-4 rounded-xl bg-card border border-border/50 hover:border-primary/30 transition-colors group cursor-default"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{cat.icon}</span>
-                      <div>
-                        <p className="font-semibold text-sm">{cat.label}</p>
-                        <p className="text-xs text-muted-foreground">{cat.players} Fragen</p>
-                      </div>
-                    </div>
-                  </motion.div>
-                ))}
-              </div>
-              <p className="text-center text-xs text-muted-foreground mt-3">
-                + 12 weitere Kategorien
-              </p>
-            </motion.div>
-          </div>
-        </div>
-      </section>
-
-      {/* Features Section - Compact Grid */}
-      <AnimatedSection id="features" className="py-12 md:py-16 px-4 bg-muted/30">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl md:text-3xl font-bold mb-2">
-              So macht Quizzen Spaß
-            </h2>
-            <p className="text-muted-foreground text-sm md:text-base">
-              Features, die NerdQuiz besonders machen
-            </p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[
-              {
-                icon: Gamepad2,
-                title: 'Multiplayer',
-                description: '2-12 Spieler gleichzeitig',
-                color: 'text-purple-500'
-              },
-              {
-                icon: Timer,
-                title: 'Schnelle Runden',
-                description: '15 Sekunden pro Frage',
-                color: 'text-orange-500'
-              },
-              {
-                icon: Flame,
-                title: 'Streak-Boni',
-                description: 'Richtige Antworten in Folge',
-                color: 'text-yellow-500'
-              },
-              {
-                icon: Dice5,
-                title: 'Kategorie-Modi',
-                description: 'Voting, Wheel oder Würfelduell',
-                color: 'text-green-500'
-              },
-              {
-                icon: Target,
-                title: 'Schätzfragen',
-                description: 'Nicht nur Multiple Choice',
-                color: 'text-blue-500'
-              },
-              {
-                icon: Trophy,
-                title: 'Live Rangliste',
-                description: 'Echtzeit Punktestand',
-                color: 'text-pink-500'
-              },
-            ].map((feature, i) => (
-              <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 15 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.05 }}
-                className="flex items-start gap-3 p-4 rounded-xl bg-background border border-border/50 hover:border-primary/20 transition-colors"
-              >
-                <div className={`w-9 h-9 rounded-lg bg-muted flex items-center justify-center flex-shrink-0 ${feature.color}`}>
-                  <feature.icon className="w-4.5 h-4.5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-sm mb-0.5">{feature.title}</h3>
-                  <p className="text-xs text-muted-foreground">{feature.description}</p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </AnimatedSection>
-
-      {/* How to Play - Horizontal Steps */}
-      <AnimatedSection className="py-12 md:py-16 px-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="text-center mb-8">
-            <h2 className="text-2xl md:text-3xl font-bold mb-2">
-              In 3 Schritten loslegen
-            </h2>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-6">
-            {[
-              {
-                step: '1',
-                title: 'Raum erstellen',
-                description: 'Erstelle einen Raum und teile den Code',
-                icon: Zap,
-                color: 'from-primary to-cyan-400'
-              },
-              {
-                step: '2',
-                title: 'Kategorie wählen',
-                description: 'Stimmt ab oder dreht am Glücksrad',
-                icon: BookOpen,
-                color: 'from-secondary to-pink-400'
-              },
-              {
-                step: '3',
-                title: 'Quizzen!',
-                description: 'Beantwortet Fragen und sammelt Punkte',
-                icon: Trophy,
-                color: 'from-amber-500 to-orange-500'
-              },
-            ].map((item, i) => (
-              <motion.div
-                key={item.step}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ delay: i * 0.15 }}
-                className="relative text-center p-6 rounded-2xl bg-card border border-border/50"
-              >
-                <div className={`w-12 h-12 mx-auto rounded-xl bg-gradient-to-br ${item.color} flex items-center justify-center mb-4 shadow-lg`}>
-                  <item.icon className="w-6 h-6 text-white" />
-                </div>
-                <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-6 h-6 rounded-full bg-muted border-2 border-background flex items-center justify-center text-xs font-bold">
-                  {item.step}
-                </div>
-                <h3 className="font-bold mb-1">{item.title}</h3>
-                <p className="text-sm text-muted-foreground">{item.description}</p>
-              </motion.div>
-            ))}
-          </div>
-
-          <div className="text-center mt-8">
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-4"
+          >
             <Button
+              size="lg"
+              className="h-14 px-8 text-lg rounded-2xl bg-violet-600 hover:bg-violet-500 text-white shadow-xl shadow-violet-600/20 w-full sm:w-auto transition-transform hover:scale-105"
               onClick={() => setDialogMode('create')}
               disabled={!isConnected}
-              className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/20"
             >
-              <Play className="w-4 h-4 mr-2" />
-              Jetzt starten
+              <Zap className="w-5 h-5 mr-2 fill-current" />
+              Raum erstellen
             </Button>
-          </div>
-        </div>
-      </AnimatedSection>
+            <Button
+              size="lg"
+              variant="outline"
+              className="h-14 px-8 text-lg rounded-2xl border-white/10 hover:bg-white/5 hover:text-white w-full sm:w-auto"
+              onClick={() => setDialogMode('join')}
+              disabled={!isConnected}
+            >
+              Code eingeben
+            </Button>
+          </motion.div>
+        </motion.div>
+      </section>
 
-      {/* Categories Grid - Compact */}
-      <AnimatedSection id="categories" className="py-12 md:py-16 px-4 bg-muted/30">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-6">
-            <div>
-              <h2 className="text-2xl md:text-3xl font-bold">
-                17 Kategorien
-              </h2>
-              <p className="text-muted-foreground text-sm">
-                Von Gaming bis Wissenschaft
-              </p>
+      {/* --- STATS CARD (Absolute/Floating) --- */}
+      <div className="relative max-w-7xl mx-auto px-4 -mt-12 mb-24 z-10 hidden md:block">
+        <motion.div
+          initial={{ opacity: 0, y: 40 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true }}
+          className="grid grid-cols-4 gap-px bg-white/5 border border-white/10 rounded-2xl overflow-hidden backdrop-blur-md"
+        >
+          {[
+            { label: 'Fragen', val: '2,500+', icon: Book },
+            { label: 'Kategorien', val: '17', icon: ListOrdered },
+            { label: 'Max. Spieler', val: '12', icon: Users },
+            { label: 'Kosten', val: '0€', icon: Trophy },
+          ].map((stat, i) => (
+            <div key={i} className="p-6 flex flex-col items-center text-center hover:bg-white/5 transition-colors group">
+              <stat.icon className="w-6 h-6 text-muted-foreground group-hover:text-primary mb-2 transition-colors" />
+              <span className="text-2xl font-bold">{stat.val}</span>
+              <span className="text-sm text-muted-foreground uppercase tracking-wider">{stat.label}</span>
             </div>
+          ))}
+        </motion.div>
+      </div>
+
+      {/* --- FEATURE GRID --- */}
+      <section className="py-24 px-4 bg-muted/20">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center max-w-2xl mx-auto mb-16">
+            <h2 className="text-3xl md:text-5xl font-bold mb-6">Mehr als nur ein Quiz</h2>
+            <p className="text-muted-foreground text-lg">Ein komplettes Game-Show Erlebnis für dich und deine Freunde.</p>
           </div>
 
-          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 md:gap-3">
-            {CATEGORIES.map((cat, i) => (
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {FEATURES.map((feature, i) => (
               <motion.div
-                key={cat.name}
-                initial={{ opacity: 0, scale: 0.9 }}
-                whileInView={{ opacity: 1, scale: 1 }}
+                key={i}
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: i * 0.02 }}
-                whileHover={{ scale: 1.05 }}
-                className={`p-3 rounded-lg bg-gradient-to-br ${cat.color} cursor-default text-center group`}
+                transition={{ delay: i * 0.1 }}
+                whileHover={{ y: -5 }}
+                className="p-6 rounded-3xl bg-card border border-border/50 shadow-sm hover:shadow-xl hover:border-primary/20 transition-all duration-300"
               >
-                <span className="text-xl md:text-2xl block mb-1">{cat.icon}</span>
-                <span className="text-[10px] md:text-xs font-medium text-white/90 leading-tight block">{cat.name}</span>
+                <div className={`w-12 h-12 rounded-2xl ${feature.color} flex items-center justify-center mb-4`}>
+                  <feature.icon className="w-6 h-6" />
+                </div>
+                <h3 className="text-xl font-bold mb-2">{feature.title}</h3>
+                <p className="text-muted-foreground">{feature.desc}</p>
               </motion.div>
             ))}
           </div>
         </div>
-      </AnimatedSection>
-
-      {/* News + Ad Section - Side by Side on Desktop */}
-      <AnimatedSection id="news" className="py-12 md:py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-3 gap-8">
-            {/* News */}
-            <div className="lg:col-span-2">
-              <div className="flex items-center gap-2 mb-4">
-                <Newspaper className="w-5 h-5 text-primary" />
-                <h2 className="text-xl font-bold">News & Updates</h2>
-              </div>
-              
-              <div className="space-y-3">
-                {NEWS_ITEMS.map((news, i) => (
-                  <motion.article
-                    key={news.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    whileInView={{ opacity: 1, x: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: i * 0.1 }}
-                    className="flex items-start gap-4 p-4 rounded-xl bg-card border border-border/50 hover:border-primary/20 transition-colors group cursor-pointer"
-                  >
-                    <div className={`px-2 py-1 rounded text-[10px] font-bold uppercase ${news.tagColor} text-primary-foreground flex-shrink-0`}>
-                      {news.tag}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="font-semibold text-sm group-hover:text-primary transition-colors truncate">
-                          {news.title}
-                        </h3>
-                      </div>
-                      <p className="text-xs text-muted-foreground line-clamp-1">
-                        {news.description}
-                      </p>
-                    </div>
-                    <span className="text-xs text-muted-foreground flex-shrink-0">{news.date}</span>
-                  </motion.article>
-                ))}
-              </div>
-            </div>
-
-            {/* Ad Placeholder */}
-            <div className="hidden lg:block">
-              <div className="sticky top-20">
-                <div className="h-[250px] rounded-xl border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground/40 text-sm bg-muted/20">
-                  Werbung
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </AnimatedSection>
-
-      {/* CTA Banner - Compact */}
-      <section className="py-12 px-4">
-        <div className="max-w-4xl mx-auto">
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-primary/10 via-secondary/10 to-primary/10 border border-primary/20 p-6 md:p-8">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2" />
-            
-            <div className="relative flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="text-center md:text-left">
-                <h2 className="text-xl md:text-2xl font-bold mb-1">
-                  Bereit für die Challenge?
-                </h2>
-                <p className="text-muted-foreground text-sm">
-                  Starte jetzt und finde heraus, wer der größte Nerd ist!
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button
-                  onClick={() => setDialogMode('create')}
-                  disabled={!isConnected}
-                  className="bg-primary hover:bg-primary/90 shadow-lg shadow-primary/25"
-                >
-                  <Zap className="w-4 h-4 mr-2" />
-                  Spiel erstellen
-                </Button>
-                <Button
-                  onClick={() => setDialogMode('join')}
-                  disabled={!isConnected}
-                  variant="outline"
-                >
-                  Beitreten
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
       </section>
 
-      {/* Mobile Ad Placeholder */}
-      <section className="py-4 px-4 lg:hidden">
-        <div className="max-w-md mx-auto">
-          <div className="h-20 rounded-lg border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground/40 text-xs bg-muted/20">
-            Werbung
-          </div>
-        </div>
-      </section>
-
-      {/* Footer - Minimal */}
-      <footer className="py-8 px-4 border-t border-border/50 mt-auto">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            {/* Logo */}
-            <div className="flex items-center gap-2">
-              <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-primary to-secondary flex items-center justify-center">
-                <Brain className="w-3.5 h-3.5 text-primary-foreground" />
-              </div>
-              <span className="font-bold text-sm">
-                <span className="text-primary">Nerd</span>Quiz
-              </span>
-              <span className="text-xs text-muted-foreground">• Battle of Brains</span>
+      {/* --- BONUS ROUNDS SHOWCASE --- */}
+      <section className="py-24 px-4 overflow-hidden">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex flex-col md:flex-row gap-4 items-end justify-between mb-12">
+            <div>
+              <span className="text-sm font-bold text-violet-400 uppercase tracking-widest mb-2 block">New Features</span>
+              <h2 className="text-4xl md:text-5xl font-bold">Bonus Rounds</h2>
             </div>
-
-            {/* Links */}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground">
-              <a href="#" className="hover:text-foreground transition-colors">Impressum</a>
-              <a href="#" className="hover:text-foreground transition-colors">Datenschutz</a>
-              <a href="#" className="hover:text-foreground transition-colors">Kontakt</a>
-            </div>
-
-            {/* Made with love */}
-            <p className="text-xs text-muted-foreground flex items-center gap-1">
-              Made with <Heart className="w-3 h-3 text-secondary fill-secondary" /> für Nerds
+            <p className="text-muted-foreground max-w-md text-right hidden md:block">
+              Spezial-Modi, die das Spielgeschehen auf den Kopf stellen und für Abwechslung sorgen.
             </p>
           </div>
+
+          <div className="grid lg:grid-cols-2 gap-8">
+            {BONUS_ROUNDS.map((round, i) => (
+              <motion.div
+                key={round.id}
+                initial={{ opacity: 0, x: i % 2 === 0 ? -20 : 20 }}
+                whileInView={{ opacity: 1, x: 0 }}
+                viewport={{ once: true }}
+                className={`relative group overflow-hidden rounded-3xl border ${round.border} bg-card p-8 h-full min-h-[300px] flex flex-col justify-end`}
+              >
+                {/* Background Gradient */}
+                <div className={`absolute inset-0 bg-gradient-to-br ${round.gradient} opacity-0 group-hover:opacity-100 transition-opacity duration-500`} />
+
+                {/* Content */}
+                <div className="relative z-10">
+                  <div className="w-14 h-14 rounded-2xl bg-background/50 backdrop-blur border border-white/10 flex items-center justify-center mb-6">
+                    <round.icon className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-3xl font-black mb-1">{round.title}</h3>
+                  <p className="text-sm font-bold opacity-70 mb-4 uppercase tracking-widest">{round.subtitle}</p>
+                  <p className="text-lg text-muted-foreground group-hover:text-foreground transition-colors">
+                    {round.desc}
+                  </p>
+                </div>
+
+                {/* Decorative Pattern */}
+                <div className="absolute top-0 right-0 p-8 opacity-5 group-hover:opacity-10 transition-opacity transform group-hover:scale-110 duration-700">
+                  <round.icon className="w-48 h-48" />
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* --- CATEGORIES PREVIEW --- */}
+      <section className="py-20 border-y border-white/5 bg-black/20">
+        <div className="max-w-7xl mx-auto px-4">
+          <h2 className="text-2xl font-bold mb-10 text-center text-muted-foreground">
+            Wähle aus <span className="text-foreground">17 Kategorien</span>
+          </h2>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            {CATEGORIES.map((cat, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, scale: 0.8 }}
+                whileInView={{ opacity: 1, scale: 1 }}
+                viewport={{ once: true, margin: "-50px" }}
+                transition={{ delay: i * 0.02 }}
+                whileHover={{ y: -5, filter: 'brightness(1.2)' }}
+                className="group relative h-32 rounded-xl overflow-hidden cursor-default bg-card border border-white/5"
+              >
+                <div className={`absolute inset-0 bg-gradient-to-br ${cat.color} opacity-10 group-hover:opacity-20 transition-opacity`} />
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-4">
+                  <cat.icon className="w-8 h-8 opacity-70 group-hover:opacity-100 group-hover:scale-110 transition-all duration-300" />
+                  <div className="text-center">
+                    <span className="block font-bold text-sm leading-tight">{cat.name}</span>
+                  </div>
+                </div>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* --- FOOTER --- */}
+      <footer className="py-12 px-4 border-t border-white/5 mt-auto bg-black/40">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6">
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <Brain className="w-5 h-5" />
+            <span className="font-bold">NerdBattle</span>
+            <span className="text-xs opacity-50 ml-2">v2.0 Next Gen</span>
+          </div>
+
+          <div className="flex gap-6 text-sm text-muted-foreground">
+            <a href="https://github.com/Fizzyy89" target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">GitHub</a>
+            <a href="#" className="hover:text-white transition-colors">Datenschutz</a>
+            <a href="#" className="hover:text-white transition-colors">Impressum</a>
+          </div>
+
+          <p className="text-xs text-muted-foreground/50">
+            Made with <span className="text-red-500">♥</span> for Nerds
+          </p>
         </div>
       </footer>
 
-      {/* Create Room Dialog */}
-      <Dialog open={dialogMode === 'create'} onOpenChange={(open) => !open && closeDialog()}>
-        <DialogContent className="bg-card border-border max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Zap className="w-4 h-4 text-primary" />
-              </div>
-              Neues Spiel erstellen
-            </DialogTitle>
-            <DialogDescription>
-              Du wirst der Host des Spiels.
-            </DialogDescription>
-          </DialogHeader>
+      {/* --- DIALOGS (Keep logic, update styling) --- */}
 
-          <form onSubmit={(e) => { e.preventDefault(); handleCreate(); }} className="space-y-4 mt-2">
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                Dein Name
-              </label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="z.B. QuizMaster"
-                maxLength={16}
-                className="h-11"
-                autoFocus
-              />
-            </div>
-
-            <AnimatePresence>
-              {error && (
-                <motion.p
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="text-destructive text-sm"
-                >
-                  {error}
-                </motion.p>
-              )}
-            </AnimatePresence>
-
-            <Button
-              type="submit"
-              disabled={loading || !name.trim()}
-              className="w-full h-11 font-semibold bg-primary hover:bg-primary/90"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
+      {/* --- DIALOGS / DRAWERS --- */}
+      {isDesktop ? (
+        <>
+          <Dialog open={dialogMode === 'create'} onOpenChange={(open) => !open && closeDialog()}>
+            <DialogContent className="sm:max-w-md bg-zinc-950 border-zinc-800 text-white">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-xl">
+                  <Zap className="w-5 h-5 text-violet-500" />
                   Lobby erstellen
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </>
-              )}
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
+                </DialogTitle>
+                <DialogDescription>
+                  Starte ein neues Spiel und lade deine Freunde ein.
+                </DialogDescription>
+              </DialogHeader>
+              {createForm}
+            </DialogContent>
+          </Dialog>
 
-      {/* Join Room Dialog */}
-      <Dialog open={dialogMode === 'join'} onOpenChange={(open) => !open && closeDialog()}>
-        <DialogContent className="bg-card border-border max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-secondary/10 flex items-center justify-center">
-                <Users className="w-4 h-4 text-secondary" />
+          <Dialog open={dialogMode === 'join'} onOpenChange={(open) => !open && closeDialog()}>
+            <DialogContent className="sm:max-w-md bg-zinc-950 border-zinc-800 text-white">
+              <DialogHeader>
+                <DialogTitle className="flex items-center gap-2 text-xl">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                  Spiel beitreten
+                </DialogTitle>
+                <DialogDescription>
+                  Gib den 4-stelligen Code ein, den dir der Host gegeben hat.
+                </DialogDescription>
+              </DialogHeader>
+              {joinForm}
+            </DialogContent>
+          </Dialog>
+        </>
+      ) : (
+        <>
+          <Drawer open={dialogMode === 'create'} onOpenChange={(open) => !open && closeDialog()}>
+            <DrawerContent className="bg-zinc-950 border-zinc-800 text-white">
+              <DrawerHeader className="text-left">
+                <DrawerTitle className="flex items-center gap-2 text-xl">
+                  <Zap className="w-5 h-5 text-violet-500" />
+                  Lobby erstellen
+                </DrawerTitle>
+                <DrawerDescription>
+                  Starte ein neues Spiel und lade deine Freunde ein.
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="px-4 pb-8">
+                {createForm}
               </div>
-              Spiel beitreten
-            </DialogTitle>
-            <DialogDescription>
-              Gib den 4-stelligen Raum-Code ein.
-            </DialogDescription>
-          </DialogHeader>
+            </DrawerContent>
+          </Drawer>
 
-          <form onSubmit={(e) => { e.preventDefault(); handleJoin(); }} className="space-y-4 mt-2">
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                Room Code
-              </label>
-              <Input
-                value={roomCode}
-                onChange={(e) => setRoomCode(e.target.value.toUpperCase())}
-                placeholder="ABCD"
-                maxLength={4}
-                className="h-14 text-2xl font-mono text-center tracking-[0.4em] uppercase"
-                autoFocus
-              />
-            </div>
+          <Drawer open={dialogMode === 'join'} onOpenChange={(open) => !open && closeDialog()}>
+            <DrawerContent className="bg-zinc-950 border-zinc-800 text-white">
+              <DrawerHeader className="text-left">
+                <DrawerTitle className="flex items-center gap-2 text-xl">
+                  <Users className="w-5 h-5 text-emerald-500" />
+                  Spiel beitreten
+                </DrawerTitle>
+                <DrawerDescription>
+                  Gib den 4-stelligen Code ein.
+                </DrawerDescription>
+              </DrawerHeader>
+              <div className="px-4 pb-8">
+                {joinForm}
+              </div>
+            </DrawerContent>
+          </Drawer>
+        </>
+      )}
 
-            <div>
-              <label className="block text-sm font-medium mb-1.5">
-                Dein Name
-              </label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="z.B. Player1"
-                maxLength={16}
-                className="h-11"
-              />
-            </div>
-
-            <AnimatePresence>
-              {error && (
-                <motion.p
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0 }}
-                  className="text-destructive text-sm"
-                >
-                  {error}
-                </motion.p>
-              )}
-            </AnimatePresence>
-
-            <Button
-              type="submit"
-              disabled={loading || !name.trim() || roomCode.length !== 4}
-              className="w-full h-11 font-semibold bg-secondary hover:bg-secondary/90 text-secondary-foreground"
-            >
-              {loading ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <>
-                  Beitreten
-                  <ArrowRight className="w-4 h-4 ml-2" />
-                </>
-              )}
-            </Button>
-          </form>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
