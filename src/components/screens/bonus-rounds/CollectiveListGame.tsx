@@ -18,6 +18,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, usePlayers, type BonusRoundEndResult } from '@/store/gameStore';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Leaderboard } from '@/components/game/Leaderboard';
 import { GameAvatar } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { CollectiveListBonusRound } from '@/types/game';
@@ -732,57 +733,18 @@ export function CollectiveListGame() {
 
             {/* Mobile Players Status */}
             <div className="lg:hidden mt-4">
-              <div className="flex flex-wrap gap-2 justify-center">
-                {/* Active Players */}
-                {bonusRound.activePlayers.map((pid) => {
-                  const player = players.find(p => p.id === pid);
-                  if (!player) return null;
-                  const isCurrent = pid === bonusRound.currentTurn?.playerId;
-                  
-                  return (
-                    <motion.div
-                      key={pid}
-                      layout
-                      className={cn(
-                        'flex items-center gap-2 px-3 py-1.5 rounded-full text-sm',
-                        isCurrent ? 'bg-amber-500/20 border border-amber-500/50' : 'glass'
-                      )}
-                    >
-                      <GameAvatar seed={player.avatarSeed} mood="neutral" size="xs" />
-                      <span className="font-medium">{player.name}</span>
-                      <span className="font-mono text-primary">{player.score}</span>
-                      {isCurrent && (
-                        <motion.div
-                          animate={{ scale: [1, 1.2, 1] }}
-                          transition={{ repeat: Infinity, duration: 1 }}
-                          className="w-2 h-2 rounded-full bg-amber-500"
-                        />
-                      )}
-                    </motion.div>
-                  );
-                })}
-                
-                {/* Eliminated Players */}
-                {bonusRound.eliminatedPlayers
-                  .filter(e => e.rank > 1) // Don't show winners here
-                  .map((eliminated) => (
-                    <motion.div
-                      key={eliminated.playerId}
-                      layout
-                      initial={{ opacity: 1 }}
-                      animate={{ opacity: 0.5 }}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded-full glass text-sm"
-                    >
-                      <div className="relative">
-                        <GameAvatar seed={eliminated.avatarSeed} mood="sad" size="xs" />
-                        <X className="absolute -top-1 -right-1 w-3 h-3 text-red-500 bg-background rounded-full" />
-                      </div>
-                      <span className="font-medium line-through text-muted-foreground">
-                        {eliminated.playerName}
-                      </span>
-                    </motion.div>
-                  ))}
-              </div>
+              <Leaderboard
+                compact
+                highlightPlayerId={bonusRound.currentTurn?.playerId}
+                eliminatedPlayerIds={bonusRound.eliminatedPlayers
+                  .filter(e => e.rank > 1) // Only show real losers as eliminated
+                  .map(e => e.playerId)}
+                customStatus={(player) => {
+                  const isCurrent = player.id === bonusRound.currentTurn?.playerId;
+                  if (isCurrent) return { color: 'text-amber-500' };
+                  return {};
+                }}
+              />
             </div>
           </>
         )}
@@ -790,90 +752,36 @@ export function CollectiveListGame() {
 
         {/* Desktop Sidebar - Rangliste */}
         <div className="hidden lg:block w-80">
-          <div className="glass rounded-2xl p-4 space-y-2 sticky top-6">
-            <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Rangliste</h3>
-            {sortedPlayers.map((player, index) => {
-              const isActive = bonusRound?.activePlayers.includes(player.id);
-              const isEliminated = bonusRound?.eliminatedPlayers.some(e => e.playerId === player.id && e.rank > 1);
-              const isCurrent = isPlaying && bonusRound?.currentTurn?.playerId === player.id;
-              
-              return (
-                <motion.div
-                  key={player.id}
-                  layout
-                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                  className={cn(
-                    'flex items-center gap-3 p-3 rounded-xl transition-all',
-                    index === 0 && 'bg-gradient-to-r from-yellow-500/20 to-transparent border border-yellow-500/30',
-                    index === 1 && 'bg-gradient-to-r from-gray-400/20 to-transparent',
-                    index === 2 && 'bg-gradient-to-r from-amber-700/20 to-transparent',
-                    isCurrent && 'ring-2 ring-amber-500/50',
-                    isEliminated && 'opacity-50',
-                    !player.isConnected && 'opacity-50'
-                  )}
-                >
-                  {/* Rank */}
-                  <div className={cn(
-                    'w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0',
-                    index === 0 && 'bg-yellow-500 text-black',
-                    index === 1 && 'bg-gray-400 text-black',
-                    index === 2 && 'bg-amber-700 text-white',
-                    index > 2 && 'bg-muted text-muted-foreground'
-                  )}>
-                    {index === 0 ? <Crown className="w-4 h-4" /> : index + 1}
-                  </div>
-
-                  {/* Avatar */}
-                  <div className="relative w-10 h-10 shrink-0">
-                    <GameAvatar
-                      seed={player.avatarSeed}
-                      mood={isEliminated ? 'sad' : isCurrent ? 'hopeful' : 'neutral'}
-                      size="md"
-                    />
-                    {isEliminated && (
-                      <X className="absolute -bottom-1 -right-1 w-5 h-5 text-red-500 bg-background rounded-full p-0.5" />
-                    )}
-                    {isCurrent && (
-                      <motion.div 
-                        animate={{ scale: [1, 1.2, 1] }}
-                        transition={{ repeat: Infinity, duration: 1 }}
-                        className="absolute -bottom-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
-                      >
-                        <span className="text-[10px] text-black font-bold">!</span>
-                      </motion.div>
-                    )}
-                  </div>
-
-                  {/* Name & Status */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className={cn("font-bold truncate", isEliminated && "line-through text-muted-foreground")}>
-                        {player.name}
-                      </span>
-                      {player.isHost && <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded shrink-0">Host</span>}
-                    </div>
-                    {player.streak > 0 && (
-                      <span className="flex items-center gap-1 text-xs text-orange-500">
-                        <Flame className="w-3 h-3" /> {player.streak}
-                      </span>
-                    )}
-                    {isActive && (
-                      <span className="text-xs text-green-500">Im Spiel</span>
-                    )}
-                    {isEliminated && (
-                      <span className="text-xs text-red-500">Ausgeschieden</span>
-                    )}
-                  </div>
-
-                  {/* Score */}
-                  <div className="text-right shrink-0">
-                    <span className="font-mono font-black text-lg text-primary">
-                      {player.score.toLocaleString()}
-                    </span>
-                  </div>
-                </motion.div>
-              );
-            })}
+          <div className="sticky top-6">
+            <Leaderboard
+              highlightPlayerId={bonusRound.currentTurn?.playerId}
+              eliminatedPlayerIds={bonusRound.eliminatedPlayers
+                .filter(e => e.rank > 1)
+                .map(e => e.playerId)}
+              customStatus={(player) => {
+                const isActive = bonusRound?.activePlayers.includes(player.id);
+                const isEliminated = bonusRound?.eliminatedPlayers.some(e => e.playerId === player.id && e.rank > 1);
+                
+                if (isActive) return { text: 'Im Spiel', color: 'text-green-500' };
+                if (isEliminated) return { text: 'Ausgeschieden', color: 'text-red-500' };
+                return {};
+              }}
+              customBadge={(player) => {
+                const isCurrent = isPlaying && bonusRound?.currentTurn?.playerId === player.id;
+                if (isCurrent) {
+                  return (
+                    <motion.div 
+                      animate={{ scale: [1, 1.2, 1] }}
+                      transition={{ repeat: Infinity, duration: 1 }}
+                      className="absolute -bottom-1 -right-1 w-5 h-5 bg-amber-500 rounded-full flex items-center justify-center"
+                    >
+                      <span className="text-[10px] text-black font-bold">!</span>
+                    </motion.div>
+                  );
+                }
+                return null;
+              }}
+            />
           </div>
         </div>
       </div>

@@ -778,9 +778,20 @@ export function HotButtonGame() {
             </motion.div>
           )}
 
-          {/* Mobile History Toggle */}
-          {questionHistory.length > 0 && !isIntro && !isFinished && (
-            <div className="lg:hidden mt-4">
+          {/* Mobile History Toggle & Leaderboard */}
+          <div className="lg:hidden mt-4 space-y-4">
+            <Leaderboard 
+              compact 
+              highlightPlayerId={hotButton?.buzzedPlayerId}
+              customStatus={(player) => {
+                const isBuzzedPlayer = hotButton?.buzzedPlayerId === player.id;
+                if (isBuzzedPlayer) return { color: 'text-amber-500' };
+                return {};
+              }}
+            />
+
+            {questionHistory.length > 0 && !isIntro && !isFinished && (
+              <div>
               <Button
                 variant="ghost"
                 size="sm"
@@ -804,6 +815,7 @@ export function HotButtonGame() {
               </AnimatePresence>
             </div>
           )}
+          </div>
         </div>
 
         {/* Desktop Sidebar */}

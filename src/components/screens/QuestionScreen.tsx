@@ -6,6 +6,7 @@ import { Clock, Users, Zap, Check, X, Flame, Crown, Info } from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, usePlayers, useCurrentPlayer, useIsHost, useMyResult } from '@/store/gameStore';
 import { Card } from '@/components/ui/card';
+import { Leaderboard } from '@/components/game/Leaderboard';
 import { GameAvatar, getMoodForContext, type AvatarMood } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { AnswerResult, Player } from '@/types/game';
@@ -561,54 +562,58 @@ export function QuestionScreen() {
 
             {/* Mobile Leaderboard - show during answering and reveal phases */}
             <div className="lg:hidden mt-4">
-              <MobileLeaderboard 
-                players={players} 
+              <Leaderboard 
+                compact
                 showAnswerStatus={!isRevealing}
                 frozenScores={frozenScores}
-                useFreeze={revealPhase !== 'answering' && !['points', 'waiting', 'returning'].includes(revealPhase)}
-                lastResults={lastResults}
-                showUpdatedScores={['points', 'waiting', 'returning'].includes(revealPhase)}
-                avatarTargets={avatarTargets}
+                pointsGained={revealPhase === 'points' || revealPhase === 'waiting' || revealPhase === 'returning' ? 
+                  new Map(lastResults?.map(r => [r.playerId, r.points]) || []) : undefined
+                }
+                customAvatar={(player) => {
+                  const target = avatarTargets.get(player.id);
+                  const isFlying = target?.type === 'answer';
+                  
+                  return (
+                    <div className="relative w-6 h-6">
+                      <motion.div
+                        animate={{ 
+                          opacity: isFlying ? 0 : 1,
+                          scale: isFlying ? 0.3 : 1,
+                          y: isFlying ? -10 : 0,
+                        }}
+                        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                      >
+                        <GameAvatar seed={player.avatarSeed} mood="neutral" size="xs" />
+                      </motion.div>
+                      {isFlying && (
+                        <motion.div
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          className="absolute inset-0 rounded-full bg-muted/30 border border-dashed border-muted-foreground/30"
+                        />
+                      )}
+                    </div>
+                  );
+                }}
               />
             </div>
           </div>
 
           {/* Desktop Leaderboard */}
           <div className="hidden lg:block w-80">
-            <div className="glass rounded-2xl p-4 space-y-2 sticky top-6">
-              <h3 className="text-sm font-bold text-muted-foreground uppercase tracking-wider mb-3">Rangliste</h3>
-              {sortedPlayers.map((player, index) => {
-                const target = avatarTargets.get(player.id);
-                const isFlying = target?.type === 'answer';
-                const result = lastResults?.find(r => r.playerId === player.id);
-                const pointsGained = result?.points ?? 0;
-                const showPts = ['points', 'waiting', 'returning'].includes(revealPhase) && pointsGained > 0;
-                
-                return (
-                  <motion.div
-                    key={player.id}
-                    layout
-                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                    className={cn(
-                      'flex items-center gap-3 p-3 rounded-xl transition-all',
-                      index === 0 && 'bg-gradient-to-r from-yellow-500/20 to-transparent border border-yellow-500/30',
-                      index === 1 && 'bg-gradient-to-r from-gray-400/20 to-transparent',
-                      index === 2 && 'bg-gradient-to-r from-amber-700/20 to-transparent',
-                      !player.isConnected && 'opacity-50'
-                    )}
-                  >
-                    {/* Rank */}
-                    <div className={cn(
-                      'w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm shrink-0',
-                      index === 0 && 'bg-yellow-500 text-black',
-                      index === 1 && 'bg-gray-400 text-black',
-                      index === 2 && 'bg-amber-700 text-white',
-                      index > 2 && 'bg-muted text-muted-foreground'
-                    )}>
-                      {index === 0 ? <Crown className="w-4 h-4" /> : index + 1}
-                    </div>
-
-                    {/* Avatar */}
+            <div className="sticky top-6">
+              <Leaderboard 
+                showAnswerStatus={!isRevealing}
+                frozenScores={frozenScores}
+                pointsGained={revealPhase === 'points' || revealPhase === 'waiting' || revealPhase === 'returning' ? 
+                  new Map(lastResults?.map(r => [r.playerId, r.points]) || []) : undefined
+                }
+                customAvatar={(player) => {
+                  const target = avatarTargets.get(player.id);
+                  const isFlying = target?.type === 'answer';
+                  const result = lastResults?.find(r => r.playerId === player.id);
+                  
+                  return (
                     <div className="relative w-10 h-10 shrink-0">
                       <motion.div
                         animate={{ 
@@ -641,66 +646,9 @@ export function QuestionScreen() {
                         />
                       )}
                     </div>
-
-                    {/* Name & Status */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold truncate">{player.name}</span>
-                        {player.isHost && <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded shrink-0">Host</span>}
-                      </div>
-                      {player.streak > 0 && (
-                        <span className="flex items-center gap-1 text-xs text-orange-500">
-                          <Flame className="w-3 h-3" /> {player.streak}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Score */}
-                    <div className="text-right shrink-0">
-                      {/* Use frozen scores during reveal, update to newScore when points phase starts */}
-                      {(() => {
-                        const isShowingPoints = showPointsFor.has(player.id);
-                        // Phases where we should show updated scores (after points have been revealed)
-                        const hasRevealedPoints = ['points', 'waiting', 'returning'].includes(revealPhase);
-                        
-                        let displayScore: number;
-                        if (hasRevealedPoints && result?.newScore !== undefined) {
-                          // After points phase started - always show updated score
-                          displayScore = result.newScore;
-                        } else if (revealPhase !== 'answering' && frozenScores.has(player.id)) {
-                          // During reveal animation (before points) - show frozen score
-                          displayScore = frozenScores.get(player.id)!;
-                        } else {
-                          // Normal state - show current score
-                          displayScore = player.score;
-                        }
-                        return (
-                          <motion.span
-                            key={displayScore}
-                            initial={isShowingPoints ? { scale: 1.3, color: '#22c55e' } : false}
-                            animate={{ scale: 1, color: 'var(--primary)' }}
-                            className="font-mono font-black text-lg text-primary block"
-                          >
-                            {displayScore.toLocaleString()}
-                          </motion.span>
-                        );
-                      })()}
-                      <AnimatePresence>
-                        {showPts && (
-                          <motion.span
-                            initial={{ opacity: 0, y: 5 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0 }}
-                            className="text-xs text-green-500 font-mono"
-                          >
-                            +{pointsGained}
-                          </motion.span>
-                        )}
-                      </AnimatePresence>
-                    </div>
-                  </motion.div>
-                );
-              })}
+                  );
+                }}
+              />
             </div>
           </div>
         </div>
@@ -710,7 +658,7 @@ export function QuestionScreen() {
 }
 
 // Avatar at answer position with entrance animation
-function AnswerAvatar({ 
+function AnswerAvatar({  
   result, 
   showPoints, 
   slotIndex,
@@ -859,117 +807,4 @@ function AnswerAvatar({
   );
 }
 
-// Mobile Leaderboard
-function MobileLeaderboard({ 
-  players, 
-  showAnswerStatus = false,
-  frozenScores,
-  useFreeze = false,
-  lastResults,
-  showUpdatedScores = false,
-  avatarTargets,
-}: { 
-  players: Player[]; 
-  showAnswerStatus?: boolean;
-  frozenScores?: Map<string, number>;
-  useFreeze?: boolean;
-  lastResults?: AnswerResult[] | null;
-  showUpdatedScores?: boolean;
-  avatarTargets?: Map<string, AvatarTarget>;
-}) {
-  // Calculate display scores based on phase
-  const playersWithScores = players.map(p => {
-    let displayScore = p.score;
-    
-    if (showUpdatedScores && lastResults) {
-      // Use newScore from results
-      const result = lastResults.find(r => r.playerId === p.id);
-      if (result?.newScore !== undefined) {
-        displayScore = result.newScore;
-      }
-    } else if (useFreeze && frozenScores?.has(p.id)) {
-      // Use frozen score
-      displayScore = frozenScores.get(p.id)!;
-    }
-    
-    return { ...p, displayScore };
-  });
-  
-  const sorted = [...playersWithScores].sort((a, b) => b.displayScore - a.displayScore);
-  
-  return (
-    <div className="flex flex-wrap gap-2 justify-center">
-      <AnimatePresence mode="popLayout">
-        {sorted.map((player, i) => {
-          const result = lastResults?.find(r => r.playerId === player.id);
-          const pointsGained = result?.points ?? 0;
-          const showPointsBadge = showUpdatedScores && pointsGained > 0;
-          
-          // Check if avatar is flying to an answer
-          const target = avatarTargets?.get(player.id);
-          const isFlying = target?.type === 'answer';
-          
-          return (
-            <motion.div
-              key={player.id}
-              layout
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
-              className={cn(
-                'flex items-center gap-2 px-3 py-1.5 rounded-full glass text-sm',
-                i === 0 && 'border-yellow-500/50 bg-yellow-500/10',
-                !player.isConnected && 'opacity-50'
-              )}
-            >
-              {i === 0 && <Crown className="w-3.5 h-3.5 text-yellow-500" />}
-              
-              {/* Avatar with flying animation */}
-              <div className="relative w-6 h-6">
-                <motion.div
-                  animate={{ 
-                    opacity: isFlying ? 0 : 1,
-                    scale: isFlying ? 0.3 : 1,
-                    y: isFlying ? -10 : 0,
-                  }}
-                  transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-                >
-                  <GameAvatar seed={player.avatarSeed} mood="neutral" size="xs" />
-                </motion.div>
-                {/* Placeholder when flying */}
-                {isFlying && (
-                  <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="absolute inset-0 rounded-full bg-muted/30 border border-dashed border-muted-foreground/30"
-                  />
-                )}
-              </div>
-              
-              <span className="font-medium truncate max-w-[80px]">{player.name}</span>
-              <motion.span 
-                key={player.displayScore}
-                initial={showPointsBadge ? { scale: 1.2, color: '#22c55e' } : false}
-                animate={{ scale: 1, color: 'var(--primary)' }}
-                className="font-mono text-primary font-bold"
-              >
-                {player.displayScore}
-              </motion.span>
-              {showPointsBadge && (
-                <motion.span
-                  initial={{ opacity: 0, scale: 0.5 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  className="text-[10px] font-mono font-bold text-green-500"
-                >
-                  +{pointsGained}
-                </motion.span>
-              )}
-              {showAnswerStatus && player.hasAnswered && <Check className="w-3.5 h-3.5 text-green-500" />}
-            </motion.div>
-          );
-        })}
-      </AnimatePresence>
-    </div>
-  );
-}
 
