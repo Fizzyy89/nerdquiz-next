@@ -82,13 +82,37 @@ export const MATCHING = {
 
 /**
  * Limits für Kategorie-Auswahl
+ * 
+ * WICHTIG: Die Mindestanzahl-Limits gelten NUR für normale Fragerunden!
+ * 
+ * Normale Runden benötigen BEIDE Fragetypen:
+ * - Multiple Choice Fragen (für Hauptfragen)
+ * - Schätzfragen (für die Schätzrunde)
+ * 
+ * Bonus-Runden (Collective List, Hot Button) sind NICHT betroffen:
+ * - Sie können Fragen aus ALLEN Kategorien verwenden
+ * - Keine Mindestanzahl erforderlich
+ * - Beispiel: Eine Kategorie "Essen & Trinken" kann nur 1 Collective List
+ *   Frage haben und wird trotzdem in Bonus-Runden verwendet
  */
 export const CATEGORY_LIMITS = {
   /** Maximale Anzahl Segmente im Glücksrad */
   WHEEL_MAX_SEGMENTS: 8,
   
-  /** Anzahl Kategorien für Voting */
-  VOTING_CATEGORIES: 3,
+  /** Anzahl Kategorien für Voting (und andere Auswahlmodi) */
+  VOTING_CATEGORIES: 8,
+  
+  /** 
+   * Minimale Anzahl Multiple Choice Fragen für normale Runden
+   * Eine normale Runde benötigt mehrere MC-Fragen pro Spiel
+   */
+  MIN_MULTIPLE_CHOICE_FOR_NORMAL_ROUNDS: 50,
+  
+  /** 
+   * Minimale Anzahl Schätzfragen für normale Runden
+   * Jede normale Runde enthält mindestens 1 Schätzfrage
+   */
+  MIN_ESTIMATION_FOR_NORMAL_ROUNDS: 20,
 } as const;
 
 // ============================================

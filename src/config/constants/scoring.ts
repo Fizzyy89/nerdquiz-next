@@ -58,6 +58,9 @@ export const ESTIMATION_SCORING = {
  * Punkte-System für Hot Button Bonus Round
  */
 export const HOT_BUTTON_SCORING = {
+  /** Basis-Punkte für richtige Antwort */
+  BASE_POINTS: 1500,
+  
   /** Strafpunkte für falsche Antwort */
   WRONG_PENALTY: -500,
   

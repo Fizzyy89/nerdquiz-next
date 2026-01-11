@@ -7,6 +7,7 @@
  */
 
 import type { Server as SocketServer } from 'socket.io';
+import { BONUS_ROUND_THRESHOLDS } from '@/config/constants';
 
 // ============================================
 // TYPES
@@ -183,7 +184,7 @@ class BotManager {
     const turnNumber = bonusRound.turnNumber; // Capture for validation
 
     // Bot decides: 80% chance to try an answer, 20% chance to skip (get eliminated)
-    const shouldTry = Math.random() < 0.8;
+    const shouldTry = Math.random() < BONUS_ROUND_THRESHOLDS.BOT_ANSWER_PROBABILITY;
     
     if (!shouldTry) {
       // Bot decides to skip

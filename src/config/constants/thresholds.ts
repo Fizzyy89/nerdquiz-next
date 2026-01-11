@@ -105,6 +105,12 @@ export const BONUS_ROUND_THRESHOLDS = {
   
   /** Perfekte Completion */
   COLLECTIVE_LIST_PERFECT_COMPLETION: 100,
+  
+  /** Auto-Reset Schwellenwert für Kategorie-Pool (80% = 0.8) */
+  CATEGORY_RESET_THRESHOLD: 0.8,
+  
+  /** Bot Antwort-Wahrscheinlichkeit bei Collective List (80% = 0.8) */
+  BOT_ANSWER_PROBABILITY: 0.8,
 } as const;
 
 // ============================================

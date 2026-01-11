@@ -22,6 +22,16 @@ import {
   type MultipleChoiceContent,
   type EstimationContent,
 } from '@/lib/validations/questions';
+import { 
+  CATEGORY_LIMITS, 
+  HOT_BUTTON_LIMITS, 
+  HOT_BUTTON_SCORING,
+  HOT_BUTTON_TIMING,
+  COLLECTIVE_LIST_SCORING,
+  COLLECTIVE_LIST_TIMING,
+  BONUS_ROUND_THRESHOLDS,
+  MATCHING,
+} from '@/config/constants';
 
 // Initialize Prisma Client for server (Prisma 7 with adapter)
 let prisma: PrismaClient | null = null;
@@ -45,6 +55,8 @@ interface CategoryInfo {
   name: string;
   icon: string;
   questionCount: number;
+  multipleChoiceCount?: number;
+  estimationCount?: number;
 }
 
 // ============================================
@@ -135,11 +147,16 @@ function getJsonCategoryList(): CategoryInfo[] {
   const list: CategoryInfo[] = [];
 
   categories.forEach((data, id) => {
+    const multipleChoiceCount = data.questions.length;
+    const estimationCount = data.estimationQuestions?.length || 0;
+    
     list.push({
       id,
       name: data.name,
       icon: data.icon,
-      questionCount: data.questions.length + (data.estimationQuestions?.length || 0),
+      questionCount: multipleChoiceCount + estimationCount,
+      multipleChoiceCount,
+      estimationCount,
     });
   });
 
@@ -209,12 +226,37 @@ async function getDbCategoryList(): Promise<CategoryInfo[]> {
     },
   });
 
-  return categories.map(cat => ({
-    id: cat.slug, // Use slug as ID for compatibility
-    name: cat.name,
-    icon: cat.icon,
-    questionCount: cat._count.questions,
-  }));
+  // Count questions by type for each category
+  const categoriesWithCounts = await Promise.all(
+    categories.map(async (cat) => {
+      const multipleChoiceCount = await prisma!.question.count({
+        where: {
+          categoryId: cat.id,
+          isActive: true,
+          type: 'MULTIPLE_CHOICE',
+        },
+      });
+
+      const estimationCount = await prisma!.question.count({
+        where: {
+          categoryId: cat.id,
+          isActive: true,
+          type: 'ESTIMATION',
+        },
+      });
+
+      return {
+        id: cat.slug, // Use slug as ID for compatibility
+        name: cat.name,
+        icon: cat.icon,
+        questionCount: cat._count.questions,
+        multipleChoiceCount,
+        estimationCount,
+      };
+    })
+  );
+
+  return categoriesWithCounts;
 }
 
 async function getDbRandomQuestions(categorySlug: string, count: number, excludeIds: string[] = []): Promise<GameQuestion[]> {
@@ -373,6 +415,32 @@ export async function getCategoryList(): Promise<CategoryInfo[]> {
 }
 
 /**
+ * Get categories suitable for normal rounds (with sufficient questions)
+ * 
+ * Filters categories to ensure they have enough questions for normal gameplay:
+ * - At least MIN_MULTIPLE_CHOICE_FOR_NORMAL_ROUNDS Multiple Choice questions
+ * - At least MIN_ESTIMATION_FOR_NORMAL_ROUNDS Estimation questions
+ * 
+ * This filter does NOT apply to bonus rounds (Collective List, Hot Button)
+ * as those questions are mixed across all categories.
+ */
+export async function getCategoriesForNormalRounds(): Promise<CategoryInfo[]> {
+  const allCategories = await getCategoryList();
+  
+  // Filter categories that meet the minimum requirements for normal rounds
+  const suitableCategories = allCategories.filter(cat => {
+    const hasEnoughMultipleChoice = (cat.multipleChoiceCount ?? 0) >= CATEGORY_LIMITS.MIN_MULTIPLE_CHOICE_FOR_NORMAL_ROUNDS;
+    const hasEnoughEstimation = (cat.estimationCount ?? 0) >= CATEGORY_LIMITS.MIN_ESTIMATION_FOR_NORMAL_ROUNDS;
+    
+    return hasEnoughMultipleChoice && hasEnoughEstimation;
+  });
+  
+  console.log(`✅ ${suitableCategories.length}/${allCategories.length} categories suitable for normal rounds (min ${CATEGORY_LIMITS.MIN_MULTIPLE_CHOICE_FOR_NORMAL_ROUNDS} MC + ${CATEGORY_LIMITS.MIN_ESTIMATION_FOR_NORMAL_ROUNDS} EST)`);
+  
+  return suitableCategories;
+}
+
+/**
  * Get random categories for voting with smart prioritization
  * 
  * HYBRID APPROACH:
@@ -381,17 +449,27 @@ export async function getCategoryList(): Promise<CategoryInfo[]> {
  * - Ensures variety while maintaining some randomness
  * - Auto-reset when 80% of categories have been used
  * 
+ * IMPORTANT: Only returns categories suitable for NORMAL rounds
+ * (with sufficient Multiple Choice AND Estimation questions).
+ * Bonus rounds (Collective List, Hot Button) use all categories.
+ * 
  * @param count - Number of categories to return
  * @param usedCategoryIds - Set of already played category IDs
  */
 export async function getRandomCategoriesForVoting(
-  count: number = 6, 
+  count: number = CATEGORY_LIMITS.VOTING_CATEGORIES, 
   usedCategoryIds: Set<string> = new Set()
 ): Promise<CategoryInfo[]> {
-  const allCategories = await getCategoryList();
+  // Use filtered categories for normal rounds
+  const allCategories = await getCategoriesForNormalRounds();
   
-  // Auto-reset if most categories have been used (80% threshold)
-  if (usedCategoryIds.size >= allCategories.length * 0.8 && allCategories.length > 5) {
+  if (allCategories.length === 0) {
+    console.warn('⚠️ No categories available with sufficient questions for normal rounds!');
+    return [];
+  }
+  
+  // Auto-reset if most categories have been used
+  if (usedCategoryIds.size >= allCategories.length * BONUS_ROUND_THRESHOLDS.CATEGORY_RESET_THRESHOLD && allCategories.length > 5) {
     console.log(`♻️ ${usedCategoryIds.size}/${allCategories.length} categories used, resetting pool for variety`);
     usedCategoryIds.clear();
   }
@@ -407,7 +485,7 @@ export async function getRandomCategoriesForVoting(
   // Build weighted array
   const weightedPool: CategoryInfo[] = [];
   
-  // Add unused categories with higher weight (5x)
+  // Add unused categories with higher weight (3x)
   for (const cat of unusedCategories) {
     for (let i = 0; i < UNUSED_WEIGHT; i++) {
       weightedPool.push(cat);
@@ -502,6 +580,11 @@ interface BonusRoundQuestion {
 
 /**
  * Get a random COLLECTIVE_LIST question from the database
+ * 
+ * NOTE: Bonus rounds are NOT restricted by category question counts.
+ * They can use questions from ANY category, regardless of how many
+ * Multiple Choice or Estimation questions that category has.
+ * 
  * @param excludeIds - Question IDs to exclude (already used in this session)
  */
 export async function getRandomBonusRoundQuestion(excludeIds: string[] = []): Promise<BonusRoundQuestion | null> {
@@ -590,9 +673,9 @@ export async function getRandomBonusRoundQuestion(excludeIds: string[] = []): Pr
         aliases: item.aliases || [item.display],
         group: item.group,
       })),
-      timePerTurn: content.timePerTurn || 15,
-      pointsPerCorrect: content.pointsPerCorrect || 200,
-      fuzzyThreshold: content.fuzzyThreshold || 0.85,
+      timePerTurn: content.timePerTurn || (COLLECTIVE_LIST_TIMING.TURN_DURATION / 1000),
+      pointsPerCorrect: content.pointsPerCorrect || COLLECTIVE_LIST_SCORING.POINTS_PER_CORRECT,
+      fuzzyThreshold: content.fuzzyThreshold || MATCHING.FUZZY_THRESHOLD,
     };
   } catch (error) {
     console.error('Error loading bonus round question:', error);
@@ -602,10 +685,15 @@ export async function getRandomBonusRoundQuestion(excludeIds: string[] = []): Pr
 
 /**
  * Get random HOT_BUTTON questions from the database (5 questions for a round)
+ * 
+ * NOTE: Bonus rounds are NOT restricted by category question counts.
+ * They can use questions from ANY category, regardless of how many
+ * Multiple Choice or Estimation questions that category has.
+ * 
  * @param excludeIds - Question IDs to exclude (already used in this session)
  * @param count - Number of questions to fetch (default: 5)
  */
-export async function getRandomHotButtonQuestions(excludeIds: string[] = [], count: number = 5): Promise<any | null> {
+export async function getRandomHotButtonQuestions(excludeIds: string[] = [], count: number = HOT_BUTTON_LIMITS.DEFAULT_QUESTIONS): Promise<any | null> {
   if (!prisma) {
     console.warn('⚠️ Database not available for hot button questions');
     return null;
@@ -693,8 +781,8 @@ export async function getRandomHotButtonQuestions(excludeIds: string[] = [], cou
         correctAnswer: content.correctAnswer,
         acceptedAnswers: content.acceptedAnswers || [content.correctAnswer],
         revealSpeed: content.revealSpeed || 50,
-        pointsCorrect: 1500, // Base points
-        pointsWrong: -500,
+        pointsCorrect: HOT_BUTTON_SCORING.BASE_POINTS,
+        pointsWrong: HOT_BUTTON_SCORING.WRONG_PENALTY,
         category: q.category?.name,
         categoryIcon: q.category?.icon,
         difficulty: q.difficulty,
@@ -711,11 +799,11 @@ export async function getRandomHotButtonQuestions(excludeIds: string[] = [], cou
       questionType: 'HOT_BUTTON', // WICHTIG für bonusRound.ts Router
       questionIds: hotButtonQuestions.map(q => q.id),
       questions: hotButtonQuestions,
-      buzzerTimeout: 25, // Reduced from 30s to 25s
-      answerTimeout: 15,
+      buzzerTimeout: HOT_BUTTON_TIMING.BUZZER_TIMEOUT / 1000, // Convert ms to seconds
+      answerTimeout: HOT_BUTTON_TIMING.ANSWER_TIMEOUT / 1000, // Convert ms to seconds
       allowRebuzz: true,
-      maxRebuzzAttempts: 2,
-      fuzzyThreshold: 0.85,
+      maxRebuzzAttempts: HOT_BUTTON_LIMITS.MAX_REBUZZ_ATTEMPTS,
+      fuzzyThreshold: MATCHING.FUZZY_THRESHOLD,
     };
   } catch (error) {
     console.error('Error loading hot button questions:', error);

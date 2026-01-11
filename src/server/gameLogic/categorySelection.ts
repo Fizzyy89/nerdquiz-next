@@ -33,6 +33,7 @@ import {
   UI_TIMING,
   RPS_DUEL,
   DICE_ROYALE,
+  CATEGORY_LIMITS,
 } from '@/config/constants';
 import { botManager } from '../botManager';
 import { 
@@ -51,7 +52,7 @@ const dev = process.env.NODE_ENV !== 'production';
  * Lädt zufällige Kategorien für die Auswahl
  * Mit Hybrid-Priorisierung: Unbenutzte Kategorien werden bevorzugt
  */
-export async function getRandomCategoriesForVoting(room: GameRoom, count: number = 8): Promise<CategoryInfo[]> {
+export async function getRandomCategoriesForVoting(room: GameRoom, count: number = CATEGORY_LIMITS.VOTING_CATEGORIES): Promise<CategoryInfo[]> {
   return questionLoader.getRandomCategoriesForVoting(count, room.state.usedCategoryIds);
 }
 
