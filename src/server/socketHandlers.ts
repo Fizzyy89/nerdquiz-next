@@ -17,6 +17,7 @@ import {
   broadcastRoomUpdate,
   cleanupRoom,
   scheduleRoomCleanupIfEmpty,
+  cancelRoomCleanup,
   getConnectedPlayers,
   rollDie,
   forEachRoom,
@@ -809,6 +810,11 @@ function handleReconnect(socket: Socket, io: SocketServer) {
     player.socketId = socket.id;
     player.isConnected = true;
     socket.join(data.roomCode);
+
+    // Cancel any pending cleanup timer since player reconnected
+    cancelRoomCleanup(room);
+
+    console.log(`🔄 ${player.name} reconnected to room ${data.roomCode}`);
 
     io.to(data.roomCode).emit('player_reconnected', { playerId: data.playerId });
     broadcastRoomUpdate(room, io);

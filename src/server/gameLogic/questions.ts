@@ -63,73 +63,148 @@ function updateCategoryStats(
 
 /**
  * Startet die nächste Frage
+ * 
+ * @throws Wirft keine Errors - alle Fehler werden intern behandelt
  */
 export async function startQuestion(room: GameRoom, io: SocketServer): Promise<void> {
-  let question = room.state.roundQuestions[room.state.currentQuestionIndex];
+  try {
+    let question = room.state.roundQuestions[room.state.currentQuestionIndex];
 
-  // Check if we need to load more questions (Endless Mode)
-  const isEndlessMode = room.isEndlessMode === true;
-  const endlessCategoryId = room.endlessCategoryId;
+    // Check if we need to load more questions (Endless Mode)
+    const isEndlessMode = room.isEndlessMode === true;
+    const endlessCategoryId = room.endlessCategoryId;
 
-  if (!question && isEndlessMode && endlessCategoryId) {
-    // Load more questions for endless mode
-    const { getQuestionsForRoom } = await import('./categorySelection');
-    console.log('♾️ Endless mode: Loading more questions...');
+    if (!question && isEndlessMode && endlessCategoryId) {
+      try {
+        // Load more questions for endless mode
+        const { getQuestionsForRoom } = await import('./categorySelection');
+        console.log('♾️ Endless mode: Loading more questions...');
 
-    const newQuestions = await getQuestionsForRoom(room, endlessCategoryId, 50);
-    if (newQuestions.length > 0) {
-      room.state.roundQuestions = newQuestions;
-      room.state.currentQuestionIndex = 0;
-      question = newQuestions[0];
+        const newQuestions = await getQuestionsForRoom(room, endlessCategoryId, 50);
+        if (newQuestions.length > 0) {
+          room.state.roundQuestions = newQuestions;
+          room.state.currentQuestionIndex = 0;
+          question = newQuestions[0];
 
-      io.to(room.code).emit('dev_notification', {
-        message: `♾️ ${newQuestions.length} neue Fragen geladen`
-      });
+          io.to(room.code).emit('dev_notification', {
+            message: `♾️ ${newQuestions.length} neue Fragen geladen`
+          });
+        }
+      } catch (loadError) {
+        console.error(`❌ Error loading endless mode questions for room ${room.code}:`, loadError);
+        // Fallback: End endless mode and show scoreboard
+        room.isEndlessMode = false;
+        io.to(room.code).emit('error_notification', {
+          message: 'Fehler beim Laden weiterer Fragen. Beende Endless Mode...'
+        });
+      }
     }
-  }
 
-  if (!question) {
-    // No more questions - show scoreboard
-    const { showScoreboard } = require('./matchFlow');
-    showScoreboard(room, io);
-    return;
-  }
-
-  // Reset all player answers
-  resetPlayerAnswers(room);
-
-  room.state.phase = question.type === 'estimation' ? 'estimation' : 'question';
-  room.state.currentQuestion = question;
-  room.state.showingCorrectAnswer = false;
-  room.state.timerEnd = Date.now() + (room.settings.timePerQuestion * 1000);
-
-  emitPhaseChange(room, io, room.state.phase);
-  broadcastRoomUpdate(room, io);
-
-  // Set timeout for auto-reveal
-  // RACE CONDITION FIX: Capture expected phase to prevent double-reveal
-  const roomCode = room.code;
-  const questionIndex = room.state.currentQuestionIndex;
-  const expectedPhase = room.state.phase; // 'question' or 'estimation'
-
-  room.questionTimer = setTimeout(() => {
-    const currentRoom = getRoom(roomCode);
-    if (!currentRoom) return;
-
-    // Guard against race condition: Check BOTH questionIndex AND phase
-    // If phase already changed to 'revealing' or 'estimation_reveal', skip
-    if (currentRoom.state.currentQuestionIndex !== questionIndex) return;
-    if (currentRoom.state.phase !== expectedPhase) {
-      console.log(`⏱️ Timer skipped: phase already changed from ${expectedPhase} to ${currentRoom.state.phase}`);
+    if (!question) {
+      // No more questions - show scoreboard
+      const { showScoreboard } = require('./matchFlow');
+      showScoreboard(room, io);
       return;
     }
 
-    if (expectedPhase === 'question') {
-      showAnswer(currentRoom, io);
-    } else if (expectedPhase === 'estimation') {
-      showEstimationAnswer(currentRoom, io);
+    // Validate question data
+    if (!validateQuestionData(question)) {
+      console.error(`❌ Invalid question data in room ${room.code}:`, question);
+      // Skip to next question or scoreboard
+      room.state.currentQuestionIndex++;
+      if (room.state.currentQuestionIndex < room.state.roundQuestions.length) {
+        // Try next question
+        await startQuestion(room, io);
+      } else {
+        // No more questions, show scoreboard
+        const { showScoreboard } = require('./matchFlow');
+        showScoreboard(room, io);
+      }
+      return;
     }
-  }, room.settings.timePerQuestion * 1000);
+
+    // Reset all player answers
+    resetPlayerAnswers(room);
+
+    room.state.phase = question.type === 'estimation' ? 'estimation' : 'question';
+    room.state.currentQuestion = question;
+    room.state.showingCorrectAnswer = false;
+    room.state.timerEnd = Date.now() + (room.settings.timePerQuestion * 1000);
+
+    emitPhaseChange(room, io, room.state.phase);
+    broadcastRoomUpdate(room, io);
+
+    // Set timeout for auto-reveal
+    // RACE CONDITION FIX: Capture expected phase to prevent double-reveal
+    const roomCode = room.code;
+    const questionIndex = room.state.currentQuestionIndex;
+    const expectedPhase = room.state.phase; // 'question' or 'estimation'
+
+    room.questionTimer = setTimeout(() => {
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom) return;
+
+      // Guard against race condition: Check BOTH questionIndex AND phase
+      // If phase already changed to 'revealing' or 'estimation_reveal', skip
+      if (currentRoom.state.currentQuestionIndex !== questionIndex) return;
+      if (currentRoom.state.phase !== expectedPhase) {
+        console.log(`⏱️ Timer skipped: phase already changed from ${expectedPhase} to ${currentRoom.state.phase}`);
+        return;
+      }
+
+      if (expectedPhase === 'question') {
+        showAnswer(currentRoom, io);
+      } else if (expectedPhase === 'estimation') {
+        showEstimationAnswer(currentRoom, io);
+      }
+    }, room.settings.timePerQuestion * 1000);
+
+  } catch (error) {
+    console.error(`❌ Critical error in startQuestion for room ${room.code}:`, error);
+    
+    // Emergency fallback: Show scoreboard
+    try {
+      const { showScoreboard } = require('./matchFlow');
+      showScoreboard(room, io);
+      
+      io.to(room.code).emit('error_notification', {
+        message: 'Ein technisches Problem ist aufgetreten. Überspringe zur Auswertung...'
+      });
+    } catch (fallbackError) {
+      console.error(`❌ Critical: Even fallback failed for room ${room.code}:`, fallbackError);
+    }
+  }
+}
+
+/**
+ * Validiert Frage-Daten auf Vollständigkeit
+ */
+function validateQuestionData(question: any): boolean {
+  if (!question || !question.text || !question.type) {
+    return false;
+  }
+
+  // Validate multiple choice questions
+  if (question.type === 'choice') {
+    if (!question.answers || !Array.isArray(question.answers) || question.answers.length === 0) {
+      console.warn(`⚠️ Invalid choice question: Missing or empty answers array`);
+      return false;
+    }
+    if (typeof question.correctIndex !== 'number' || question.correctIndex < 0 || question.correctIndex >= question.answers.length) {
+      console.warn(`⚠️ Invalid choice question: Invalid correctIndex`);
+      return false;
+    }
+  }
+
+  // Validate estimation questions
+  if (question.type === 'estimation') {
+    if (typeof question.correctValue !== 'number') {
+      console.warn(`⚠️ Invalid estimation question: Missing or invalid correctValue`);
+      return false;
+    }
+  }
+
+  return true;
 }
 
 // ============================================

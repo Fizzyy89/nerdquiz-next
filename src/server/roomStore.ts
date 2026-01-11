@@ -410,6 +410,12 @@ export function cleanupRoom(code: string): void {
       room.questionTimer = undefined;
     }
     
+    // Clear cleanup timer
+    if (room.cleanupTimer) {
+      clearTimeout(room.cleanupTimer);
+      room.cleanupTimer = undefined;
+    }
+    
     // Clear bonus round timers
     if (room.state.bonusRound) {
       const br = room.state.bonusRound;
@@ -430,16 +436,25 @@ export function cleanupRoom(code: string): void {
   }
   
   rooms.delete(code);
-  console.log(`🗑️ Room ${code} deleted (timers cleared)`);
+  console.log(`🗑️ Room ${code} deleted (all timers cleared)`);
 }
 
 /**
  * Prüft ob alle menschlichen Spieler disconnected sind und plant ggf. Löschung
  * Bots werden nicht gezählt - nur echte Spieler halten den Raum am Leben
+ * 
+ * WICHTIG: Cleanup-Timer ist cancellable - wenn Spieler reconnecten, wird der Timer gelöscht
  */
 export function scheduleRoomCleanupIfEmpty(room: GameRoom, io: SocketServer, delayMs: number = 60000): void {
+  // Clear any existing cleanup timer
+  if (room.cleanupTimer) {
+    clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = undefined;
+    console.log(`⏱️ Cancelled existing cleanup timer for room ${room.code}`);
+  }
+
   const roomCode = room.code;
-  setTimeout(() => {
+  room.cleanupTimer = setTimeout(() => {
     const currentRoom = rooms.get(roomCode);
     if (currentRoom) {
       // Only count human players - bots don't keep a room alive
@@ -447,9 +462,25 @@ export function scheduleRoomCleanupIfEmpty(room: GameRoom, io: SocketServer, del
       if (connectedHumans.length === 0) {
         console.log(`🗑️ No human players connected in room ${roomCode}, cleaning up...`);
         cleanupRoom(roomCode);
+      } else {
+        console.log(`✅ Room ${roomCode} still has ${connectedHumans.length} human player(s), keeping alive`);
+        currentRoom.cleanupTimer = undefined;
       }
     }
   }, delayMs);
+  
+  console.log(`⏱️ Scheduled cleanup for room ${roomCode} in ${delayMs / 1000}s`);
+}
+
+/**
+ * Cancelt einen geplanten Cleanup-Timer (z.B. wenn Spieler reconnecten)
+ */
+export function cancelRoomCleanup(room: GameRoom): void {
+  if (room.cleanupTimer) {
+    clearTimeout(room.cleanupTimer);
+    room.cleanupTimer = undefined;
+    console.log(`✅ Cancelled cleanup timer for room ${room.code} (player reconnected)`);
+  }
 }
 
 // ============================================

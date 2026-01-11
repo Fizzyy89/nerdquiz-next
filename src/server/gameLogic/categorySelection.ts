@@ -165,56 +165,75 @@ export async function finalizeCategoryVoting(room: GameRoom, io: SocketServer): 
   }
   room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
   
-  const voteCounts = new Map<string, number>();
-  room.state.categoryVotes.forEach((catId) => {
-    voteCounts.set(catId, (voteCounts.get(catId) || 0) + 1);
-  });
-
-  let maxVotes = 0;
-  let winners: string[] = [];
-  
-  if (voteCounts.size > 0) {
-    voteCounts.forEach((count, catId) => {
-      if (count > maxVotes) {
-        maxVotes = count;
-        winners = [catId];
-      } else if (count === maxVotes) {
-        winners.push(catId);
-      }
+  try {
+    const voteCounts = new Map<string, number>();
+    room.state.categoryVotes.forEach((catId) => {
+      voteCounts.set(catId, (voteCounts.get(catId) || 0) + 1);
     });
-  }
 
-  const selectedCategoryId = winners.length > 0 
-    ? winners[Math.floor(Math.random() * winners.length)]
-    : room.state.votingCategories[Math.floor(Math.random() * room.state.votingCategories.length)]?.id;
-
-  await selectCategoryAndLoadQuestions(room, selectedCategoryId, io);
-
-  const categoryData = await getCategoryData(selectedCategoryId);
-  
-  // If there's a tie, send tiebreaker event first with roulette animation
-  const isTie = winners.length > 1;
-  const tiedCategories = isTie 
-    ? winners.map(catId => {
-        const cat = room.state.votingCategories.find(c => c.id === catId);
-        return cat ? { id: cat.id, name: cat.name, icon: cat.icon } : null;
-      }).filter(Boolean)
-    : [];
-
-  const roomCode = room.code;
-  
-  if (isTie) {
-    console.log(`🎰 Voting tie between ${winners.length} categories, starting roulette...`);
-    io.to(roomCode).emit('voting_tiebreaker', {
-      tiedCategories,
-      winnerId: selectedCategoryId,
-    });
+    let maxVotes = 0;
+    let winners: string[] = [];
     
-    // Wait for roulette animation, then send category_selected
-    setTimeout(() => {
-      const currentRoom = getRoom(roomCode);
-      if (!currentRoom) return;
+    if (voteCounts.size > 0) {
+      voteCounts.forEach((count, catId) => {
+        if (count > maxVotes) {
+          maxVotes = count;
+          winners = [catId];
+        } else if (count === maxVotes) {
+          winners.push(catId);
+        }
+      });
+    }
+
+    const selectedCategoryId = winners.length > 0 
+      ? winners[Math.floor(Math.random() * winners.length)]
+      : room.state.votingCategories[Math.floor(Math.random() * room.state.votingCategories.length)]?.id;
+
+    if (!selectedCategoryId) {
+      throw new Error('No category could be selected');
+    }
+
+    await selectCategoryAndLoadQuestions(room, selectedCategoryId, io);
+
+    const categoryData = await getCategoryData(selectedCategoryId);
+    
+    // If there's a tie, send tiebreaker event first with roulette animation
+    const isTie = winners.length > 1;
+    const tiedCategories = isTie 
+      ? winners.map(catId => {
+          const cat = room.state.votingCategories.find(c => c.id === catId);
+          return cat ? { id: cat.id, name: cat.name, icon: cat.icon } : null;
+        }).filter(Boolean)
+      : [];
+
+    const roomCode = room.code;
+    
+    if (isTie) {
+      console.log(`🎰 Voting tie between ${winners.length} categories, starting roulette...`);
+      io.to(roomCode).emit('voting_tiebreaker', {
+        tiedCategories,
+        winnerId: selectedCategoryId,
+      });
       
+      // Wait for roulette animation, then send category_selected
+      setTimeout(() => {
+        const currentRoom = getRoom(roomCode);
+        if (!currentRoom) return;
+        
+        io.to(roomCode).emit('category_selected', { 
+          categoryId: selectedCategoryId,
+          categoryName: categoryData?.name,
+          categoryIcon: categoryData?.icon,
+        });
+
+        setTimeout(() => {
+          const innerRoom = getRoom(roomCode);
+          if (!innerRoom) return;
+          const { startQuestion } = require('./questions');
+          startQuestion(innerRoom, io);
+        }, 2500);
+      }, 3000);
+    } else {
       io.to(roomCode).emit('category_selected', { 
         categoryId: selectedCategoryId,
         categoryName: categoryData?.name,
@@ -222,25 +241,27 @@ export async function finalizeCategoryVoting(room: GameRoom, io: SocketServer): 
       });
 
       setTimeout(() => {
-        const innerRoom = getRoom(roomCode);
-        if (!innerRoom) return;
+        const currentRoom = getRoom(roomCode);
+        if (!currentRoom) return;
         const { startQuestion } = require('./questions');
-        startQuestion(innerRoom, io);
+        startQuestion(currentRoom, io);
       }, 2500);
-    }, 3000);
-  } else {
-    io.to(roomCode).emit('category_selected', { 
-      categoryId: selectedCategoryId,
-      categoryName: categoryData?.name,
-      categoryIcon: categoryData?.icon,
-    });
+    }
 
-    setTimeout(() => {
-      const currentRoom = getRoom(roomCode);
-      if (!currentRoom) return;
-      const { startQuestion } = require('./questions');
-      startQuestion(currentRoom, io);
-    }, 2500);
+  } catch (error) {
+    console.error(`❌ Error in finalizeCategoryVoting for room ${room.code}:`, error);
+    
+    // Fallback: Show scoreboard
+    try {
+      const { showScoreboard } = require('./matchFlow');
+      showScoreboard(room, io);
+      
+      io.to(room.code).emit('error_notification', {
+        message: 'Fehler bei der Kategorieauswahl. Überspringe zur Auswertung...'
+      });
+    } catch (fallbackError) {
+      console.error(`❌ Critical: Fallback failed in finalizeCategoryVoting:`, fallbackError);
+    }
   }
 }
 
@@ -291,24 +312,41 @@ export async function finalizeWheelSelection(room: GameRoom, io: SocketServer, c
   }
   room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
   
-  const roomCode = room.code;
-  await selectCategoryAndLoadQuestions(room, categoryId, io);
-  room.state.wheelSelectedIndex = null;
+  try {
+    const roomCode = room.code;
+    await selectCategoryAndLoadQuestions(room, categoryId, io);
+    room.state.wheelSelectedIndex = null;
 
-  const categoryData = await getCategoryData(categoryId);
-  
-  io.to(roomCode).emit('category_selected', { 
-    categoryId,
-    categoryName: categoryData?.name,
-    categoryIcon: categoryData?.icon,
-  });
+    const categoryData = await getCategoryData(categoryId);
+    
+    io.to(roomCode).emit('category_selected', { 
+      categoryId,
+      categoryName: categoryData?.name,
+      categoryIcon: categoryData?.icon,
+    });
 
-  setTimeout(() => {
-    const currentRoom = getRoom(roomCode);
-    if (!currentRoom) return;
-    const { startQuestion } = require('./questions');
-    startQuestion(currentRoom, io);
-  }, 2000);
+    setTimeout(() => {
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom) return;
+      const { startQuestion } = require('./questions');
+      startQuestion(currentRoom, io);
+    }, 2000);
+
+  } catch (error) {
+    console.error(`❌ Error in finalizeWheelSelection for room ${room.code}:`, error);
+    
+    // Fallback: Show scoreboard
+    try {
+      const { showScoreboard } = require('./matchFlow');
+      showScoreboard(room, io);
+      
+      io.to(room.code).emit('error_notification', {
+        message: 'Fehler beim Laden der Kategorie. Überspringe zur Auswertung...'
+      });
+    } catch (fallbackError) {
+      console.error(`❌ Critical: Fallback failed in finalizeWheelSelection:`, fallbackError);
+    }
+  }
 }
 
 // ============================================
@@ -349,24 +387,41 @@ export async function finalizeLosersPick(room: GameRoom, io: SocketServer, categ
   }
   room.state.phase = 'category_announcement'; // Blockiert weitere Aufrufe
   
-  await selectCategoryAndLoadQuestions(room, categoryId, io);
+  try {
+    await selectCategoryAndLoadQuestions(room, categoryId, io);
 
-  const categoryData = await getCategoryData(categoryId);
-  
-  const roomCode = room.code;
-  io.to(roomCode).emit('category_selected', { 
-    categoryId,
-    categoryName: categoryData?.name,
-    categoryIcon: categoryData?.icon,
-    pickedBy: room.state.loserPickPlayerId,
-  });
+    const categoryData = await getCategoryData(categoryId);
+    
+    const roomCode = room.code;
+    io.to(roomCode).emit('category_selected', { 
+      categoryId,
+      categoryName: categoryData?.name,
+      categoryIcon: categoryData?.icon,
+      pickedBy: room.state.loserPickPlayerId,
+    });
 
-  setTimeout(() => {
-    const currentRoom = getRoom(roomCode);
-    if (!currentRoom) return;
-    const { startQuestion } = require('./questions');
-    startQuestion(currentRoom, io);
-  }, 2500);
+    setTimeout(() => {
+      const currentRoom = getRoom(roomCode);
+      if (!currentRoom) return;
+      const { startQuestion } = require('./questions');
+      startQuestion(currentRoom, io);
+    }, 2500);
+
+  } catch (error) {
+    console.error(`❌ Error in finalizeLosersPick for room ${room.code}:`, error);
+    
+    // Fallback: Show scoreboard
+    try {
+      const { showScoreboard } = require('./matchFlow');
+      showScoreboard(room, io);
+      
+      io.to(room.code).emit('error_notification', {
+        message: 'Fehler beim Laden der Kategorie. Überspringe zur Auswertung...'
+      });
+    } catch (fallbackError) {
+      console.error(`❌ Critical: Fallback failed in finalizeLosersPick:`, fallbackError);
+    }
+  }
 }
 
 // ============================================

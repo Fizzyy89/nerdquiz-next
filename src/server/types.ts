@@ -333,6 +333,7 @@ export interface GameRoom {
   createdAt: Date;
   // Runtime properties (not part of base state)
   questionTimer?: NodeJS.Timeout;
+  cleanupTimer?: NodeJS.Timeout; // Timer for room cleanup when empty
   forcedCategoryMode?: CategorySelectionMode;
   pendingBonusQuestion?: BonusRoundConfig;
   // Dev mode enabled via secret code (for production testing)
