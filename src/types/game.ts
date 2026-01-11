@@ -197,6 +197,8 @@ export interface HotButtonBonusRound {
   currentQuestionIndex: number;
   totalQuestions: number;
   currentQuestionText: string; // Progressively revealed text
+  currentQuestionId?: string; // DB ID of current question (for dev-mode editing)
+  currentQuestionDifficulty?: Difficulty; // Difficulty of current question (for dev-mode display)
   isFullyRevealed: boolean;
   revealedPercent: number; // 0-100, how much is revealed
 

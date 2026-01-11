@@ -172,6 +172,7 @@ export interface HotButtonQuestion {
   revealSpeed?: number;
   pointsCorrect: number;
   pointsWrong: number;
+  difficulty?: Difficulty; // For dev-mode quick editing
 }
 
 /** Result of a Hot Button question for history tracking */

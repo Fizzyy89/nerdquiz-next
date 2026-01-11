@@ -86,14 +86,19 @@ export function QuestionDebugPanel() {
       setLocalDifficulty(currentQuestion.difficulty);
     } 
     // For Hot Button bonus rounds - get difficulty from current question
-    else if (bonusRound?.type === 'hot_button' && bonusRound.questions && bonusRound.currentQuestionIndex !== undefined) {
-      const currentHotButtonQuestion = bonusRound.questions[bonusRound.currentQuestionIndex];
-      setLocalDifficulty(currentHotButtonQuestion?.difficulty as Difficulty | undefined);
+    else if (bonusRound?.type === 'hot_button' && bonusRound.currentQuestionDifficulty) {
+      setLocalDifficulty(bonusRound.currentQuestionDifficulty);
     }
     else {
       setLocalDifficulty(undefined);
     }
-  }, [currentQuestion?.id, currentQuestion?.difficulty, bonusRound?.type, bonusRound?.currentQuestionIndex, bonusRound?.questions]);
+  }, [
+    currentQuestion?.id, 
+    currentQuestion?.difficulty, 
+    bonusRound?.type, 
+    bonusRound?.type === 'hot_button' ? bonusRound.currentQuestionIndex : null,
+    bonusRound?.type === 'hot_button' ? bonusRound.currentQuestionDifficulty : null
+  ]);
 
   // Don't render if not in dev mode or no room
   if (!isDevMode || !room) return null;
@@ -101,17 +106,16 @@ export function QuestionDebugPanel() {
   // Determine what we can edit
   // Normal questions have an ID directly
   // Collective List bonus rounds have questionId in bonusRound state
-  // Hot Button bonus rounds have multiple questions, get the current one
+  // Hot Button bonus rounds have currentQuestionId for the current question
   let questionId: string | undefined;
   if (currentQuestion?.id) {
     questionId = currentQuestion.id;
   } else if (bonusRound?.questionId) {
     // Collective List
     questionId = bonusRound.questionId;
-  } else if (bonusRound?.type === 'hot_button' && bonusRound.questions && bonusRound.currentQuestionIndex !== undefined) {
-    // Hot Button - get current question from array
-    const currentHotButtonQuestion = bonusRound.questions[bonusRound.currentQuestionIndex];
-    questionId = currentHotButtonQuestion?.id;
+  } else if (bonusRound?.type === 'hot_button' && bonusRound.currentQuestionId) {
+    // Hot Button - get current question ID
+    questionId = bonusRound.currentQuestionId;
   }
   
   const hasEditableQuestion = !!questionId;

@@ -306,6 +306,8 @@ export function roomToClient(room: GameRoom): Record<string, any> {
         currentQuestionIndex: br.currentQuestionIndex,
         totalQuestions: br.questions.length,
         currentQuestionText: currentQuestion ? currentQuestion.text.substring(0, br.revealedChars) : '',
+        currentQuestionId: currentQuestion?.id, // DB ID for dev-mode editing
+        currentQuestionDifficulty: currentQuestion?.difficulty, // Difficulty for dev-mode display
         isFullyRevealed: br.isFullyRevealed,
         revealedPercent: Math.round((br.revealedChars / questionTextLength) * 100),
 
@@ -396,13 +398,39 @@ export function broadcastRoomUpdate(room: GameRoom, io: SocketServer): void {
 
 /**
  * Löscht einen Raum und räumt Bot-Manager auf
+ * WICHTIG: Löscht auch alle aktiven Timer um Memory Leaks zu vermeiden
  */
 export function cleanupRoom(code: string): void {
+  const room = rooms.get(code);
+  
+  if (room) {
+    // Clear main question timer
+    if (room.questionTimer) {
+      clearTimeout(room.questionTimer);
+      room.questionTimer = undefined;
+    }
+    
+    // Clear bonus round timers
+    if (room.state.bonusRound) {
+      const br = room.state.bonusRound;
+      if (br.type === 'collective_list' && br.currentTurnTimer) {
+        clearTimeout(br.currentTurnTimer);
+        br.currentTurnTimer = null;
+      } else if (br.type === 'hot_button') {
+        if (br.revealTimer) clearInterval(br.revealTimer);
+        if (br.buzzerTimeout) clearTimeout(br.buzzerTimeout);
+        if (br.answerTimer) clearTimeout(br.answerTimer);
+      }
+    }
+  }
+  
+  // Clean up bots
   if (dev) {
     botManager.cleanupRoom(code);
   }
+  
   rooms.delete(code);
-  console.log(`🗑️ Room ${code} deleted`);
+  console.log(`🗑️ Room ${code} deleted (timers cleared)`);
 }
 
 /**
