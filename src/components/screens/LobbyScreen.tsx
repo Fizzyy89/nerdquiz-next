@@ -41,6 +41,8 @@ import {
   type DylanAvatarOptions,
   DEFAULT_AVATAR_OPTIONS,
 } from '@/components/game/AvatarCustomizer';
+import { CustomGameConfigurator } from '@/components/game/CustomGameConfigurator';
+import { createDefaultCustomRounds, type CustomRoundConfig } from '@/config/customGame.shared';
 
 // Animated Avatar Component with idle animations
 function AnimatedAvatar({ 
@@ -524,6 +526,44 @@ function GameSummary({
   );
 }
 
+// Game Mode Toggle (Standard vs Custom)
+function GameModeToggle({
+  customMode,
+  onChange,
+}: {
+  customMode: boolean;
+  onChange: (isCustom: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-center gap-2 p-1 bg-muted/30 rounded-xl">
+      <motion.button
+        whileTap={{ scale: 0.95 }}
+        onClick={() => onChange(false)}
+        className={`flex-1 px-4 py-2.5 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
+          !customMode 
+            ? 'bg-primary text-primary-foreground shadow-md' 
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Zap className="w-4 h-4" />
+        <span>Standard</span>
+      </motion.button>
+      <motion.button
+        whileTap={{ scale: 0.95 }}
+        onClick={() => onChange(true)}
+        className={`flex-1 px-4 py-2.5 rounded-lg font-medium text-sm transition-all flex items-center justify-center gap-2 ${
+          customMode 
+            ? 'bg-primary text-primary-foreground shadow-md' 
+            : 'text-muted-foreground hover:text-foreground'
+        }`}
+      >
+        <Settings2 className="w-4 h-4" />
+        <span>Benutzerdefiniert</span>
+      </motion.button>
+    </div>
+  );
+}
+
 export function LobbyScreen() {
   const router = useRouter();
   const { startGame, updateSettings, leaveGame, rerollAvatar, updateAvatar } = useSocket();
@@ -867,88 +907,140 @@ export function LobbyScreen() {
       >
         {isHost ? (
           <div className="space-y-5">
-            {/* Basic Settings */}
-            <div className="grid grid-cols-2 gap-4">
-              <SettingControl
-                label="Runden"
-                value={room.settings.maxRounds}
-                options={[3, 5, 7, 10]}
-                onChange={(value) => updateSettings({ maxRounds: value })}
-                icon={Zap}
-                description="Kategorie-Auswahlen"
-              />
+            {/* Game Mode Toggle */}
+            <GameModeToggle
+              customMode={room.settings.customMode ?? false}
+              onChange={(isCustom) => {
+                if (isCustom) {
+                  // Switch to custom mode with default rounds based on current maxRounds
+                  const defaultRounds = createDefaultCustomRounds(room.settings.maxRounds);
+                  updateSettings({ 
+                    customMode: true, 
+                    customRounds: defaultRounds,
+                    maxRounds: defaultRounds.length,
+                  });
+                } else {
+                  // Switch back to standard mode
+                  updateSettings({ customMode: false });
+                }
+              }}
+            />
 
-              <SettingControl
-                label="Fragen"
-                value={room.settings.questionsPerRound}
-                options={[3, 5, 7, 10]}
-                onChange={(value) => updateSettings({ questionsPerRound: value })}
-                icon={HelpCircle}
-                description="Pro Runde"
-              />
-            </div>
-
-            {/* Advanced Settings Toggle */}
-            <motion.button
-              onClick={() => setShowAdvanced(!showAdvanced)}
-              className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
-              whileHover={{ scale: 1.01 }}
-              whileTap={{ scale: 0.99 }}
-            >
-              <Settings2 className="w-4 h-4" />
-              <span>Erweiterte Einstellungen</span>
-              <motion.div
-                animate={{ rotate: showAdvanced ? 180 : 0 }}
-                transition={{ duration: 0.2 }}
-              >
-                <ChevronDown className="w-4 h-4" />
-              </motion.div>
-            </motion.button>
-
-            {/* Advanced Settings Panel */}
-            <AnimatePresence>
-              {showAdvanced && (
+            <AnimatePresence mode="wait">
+              {room.settings.customMode ? (
+                /* Custom Game Configurator */
                 <motion.div
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  exit={{ opacity: 0, height: 0 }}
+                  key="custom"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.2 }}
-                  className="space-y-4 overflow-hidden"
                 >
-                  {/* Bonusrunden-Einstellungen */}
-                  <div className="glass rounded-xl p-4 space-y-4">
-                    <div className="flex items-center gap-2 text-sm font-semibold text-primary">
-                      <Gift className="w-4 h-4" />
-                      <span>Bonusrunden</span>
-                    </div>
-                    
-                    <ToggleControl
-                      label="Finale = Bonusrunde"
-                      value={room.settings.finalRoundAlwaysBonus ?? false}
-                      onChange={(value) => updateSettings({ finalRoundAlwaysBonus: value })}
-                      icon={Trophy}
-                      description="Letzte Runde immer als Bonusrunde"
+                  <CustomGameConfigurator
+                    rounds={room.settings.customRounds ?? []}
+                    onChange={(newRounds) => updateSettings({ 
+                      customRounds: newRounds,
+                      maxRounds: newRounds.length,
+                    })}
+                    questionsPerRound={room.settings.questionsPerRound}
+                    onQuestionsPerRoundChange={(value) => updateSettings({ questionsPerRound: value })}
+                  />
+                </motion.div>
+              ) : (
+                /* Standard Settings */
+                <motion.div
+                  key="standard"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.2 }}
+                  className="space-y-5"
+                >
+                  {/* Basic Settings */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <SettingControl
+                      label="Runden"
+                      value={room.settings.maxRounds}
+                      options={[3, 5, 7, 10]}
+                      onChange={(value) => updateSettings({ maxRounds: value })}
+                      icon={Zap}
+                      description="Kategorie-Auswahlen"
                     />
 
-                    <PercentControl
-                      label="Zufällige Bonusrunden"
-                      value={room.settings.bonusRoundChance ?? 0}
-                      onChange={(value) => updateSettings({ bonusRoundChance: value })}
-                      icon={Percent}
-                      description="Chance pro Runde"
+                    <SettingControl
+                      label="Fragen"
+                      value={room.settings.questionsPerRound}
+                      options={[3, 5, 7, 10]}
+                      onChange={(value) => updateSettings({ questionsPerRound: value })}
+                      icon={HelpCircle}
+                      description="Pro Runde"
                     />
                   </div>
+
+                  {/* Advanced Settings Toggle */}
+                  <motion.button
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                    className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                    whileHover={{ scale: 1.01 }}
+                    whileTap={{ scale: 0.99 }}
+                  >
+                    <Settings2 className="w-4 h-4" />
+                    <span>Erweiterte Einstellungen</span>
+                    <motion.div
+                      animate={{ rotate: showAdvanced ? 180 : 0 }}
+                      transition={{ duration: 0.2 }}
+                    >
+                      <ChevronDown className="w-4 h-4" />
+                    </motion.div>
+                  </motion.button>
+
+                  {/* Advanced Settings Panel */}
+                  <AnimatePresence>
+                    {showAdvanced && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="space-y-4 overflow-hidden"
+                      >
+                        {/* Bonusrunden-Einstellungen */}
+                        <div className="glass rounded-xl p-4 space-y-4">
+                          <div className="flex items-center gap-2 text-sm font-semibold text-primary">
+                            <Gift className="w-4 h-4" />
+                            <span>Bonusrunden</span>
+                          </div>
+                          
+                          <ToggleControl
+                            label="Finale = Bonusrunde"
+                            value={room.settings.finalRoundAlwaysBonus ?? false}
+                            onChange={(value) => updateSettings({ finalRoundAlwaysBonus: value })}
+                            icon={Trophy}
+                            description="Letzte Runde immer als Bonusrunde"
+                          />
+
+                          <PercentControl
+                            label="Zufällige Bonusrunden"
+                            value={room.settings.bonusRoundChance ?? 0}
+                            onChange={(value) => updateSettings({ bonusRoundChance: value })}
+                            icon={Percent}
+                            description="Chance pro Runde"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  {/* Game Summary */}
+                  <GameSummary 
+                    rounds={room.settings.maxRounds} 
+                    questionsPerRound={room.settings.questionsPerRound}
+                    bonusRoundChance={room.settings.bonusRoundChance ?? 0}
+                    finalRoundAlwaysBonus={room.settings.finalRoundAlwaysBonus ?? false}
+                  />
                 </motion.div>
               )}
             </AnimatePresence>
-
-            {/* Game Summary */}
-            <GameSummary 
-              rounds={room.settings.maxRounds} 
-              questionsPerRound={room.settings.questionsPerRound}
-              bonusRoundChance={room.settings.bonusRoundChance ?? 0}
-              finalRoundAlwaysBonus={room.settings.finalRoundAlwaysBonus ?? false}
-            />
 
             {error && (
               <motion.p 
@@ -1008,78 +1100,120 @@ export function LobbyScreen() {
             <div className="glass rounded-2xl p-4">
               <div className="flex items-center gap-2 mb-4">
                 <Settings2 className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm font-semibold text-muted-foreground">Aktuelle Einstellungen</span>
+                <span className="text-sm font-semibold text-muted-foreground">
+                  {room.settings.customMode ? 'Benutzerdefiniertes Spiel' : 'Aktuelle Einstellungen'}
+                </span>
               </div>
               
-              <div className="grid grid-cols-2 gap-3">
-                {/* Rounds */}
-                <div className="glass rounded-xl p-3 text-center">
-                  <div className="flex items-center justify-center gap-2 mb-1">
-                    <Zap className="w-4 h-4 text-primary" />
-                    <span className="text-xs text-muted-foreground">Runden</span>
+              {room.settings.customMode ? (
+                /* Custom Mode Display */
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-muted-foreground">Rundenfolge:</span>
+                    <span className="text-sm font-bold text-primary">{room.settings.customRounds?.length || 0} Runden</span>
                   </div>
-                  <motion.span 
-                    key={room.settings.maxRounds}
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-2xl font-black text-primary"
-                  >
-                    {room.settings.maxRounds}
-                  </motion.span>
+                  
+                  {/* Mini Round Preview */}
+                  <div className="flex flex-wrap gap-1.5">
+                    {(room.settings.customRounds || []).map((round, idx) => {
+                      const emoji = round.type === 'question_round' ? '🎯' 
+                                  : round.type === 'hot_button' ? '⚡' 
+                                  : '📝';
+                      return (
+                        <motion.div
+                          key={round.id}
+                          initial={{ scale: 0 }}
+                          animate={{ scale: 1 }}
+                          transition={{ delay: idx * 0.05 }}
+                          className="w-8 h-8 rounded-lg bg-muted/50 flex items-center justify-center text-sm"
+                          title={`Runde ${idx + 1}: ${round.type === 'question_round' ? 'Fragerunde' : round.type === 'hot_button' ? 'Hot Button' : 'Listen-Runde'}`}
+                        >
+                          {emoji}
+                        </motion.div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Questions per round info */}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground pt-2 border-t border-border/50">
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>{room.settings.questionsPerRound} Fragen pro Fragerunde</span>
+                  </div>
                 </div>
-                
-                {/* Questions per Round */}
-                <div className="glass rounded-xl p-3 text-center">
-                  <div className="flex items-center justify-center gap-2 mb-1">
-                    <HelpCircle className="w-4 h-4 text-primary" />
-                    <span className="text-xs text-muted-foreground">Fragen/Runde</span>
-                  </div>
-                  <motion.span 
-                    key={room.settings.questionsPerRound}
-                    initial={{ scale: 0.8, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    className="text-2xl font-black text-primary"
-                  >
-                    {room.settings.questionsPerRound}
-                  </motion.span>
-                </div>
-              </div>
-              
-              {/* Bonus Round Settings */}
-              {(room.settings.finalRoundAlwaysBonus || (room.settings.bonusRoundChance ?? 0) > 0) && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
-                  className="mt-3 pt-3 border-t border-border/50"
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <Gift className="w-4 h-4 text-amber-500" />
-                    <span className="text-xs text-amber-500 font-semibold">Bonusrunden</span>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {room.settings.finalRoundAlwaysBonus && (
+              ) : (
+                /* Standard Mode Display */
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    {/* Rounds */}
+                    <div className="glass rounded-xl p-3 text-center">
+                      <div className="flex items-center justify-center gap-2 mb-1">
+                        <Zap className="w-4 h-4 text-primary" />
+                        <span className="text-xs text-muted-foreground">Runden</span>
+                      </div>
                       <motion.span 
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1"
+                        key={room.settings.maxRounds}
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="text-2xl font-black text-primary"
                       >
-                        <Trophy className="w-3 h-3" />
-                        Finale = Bonus
+                        {room.settings.maxRounds}
                       </motion.span>
-                    )}
-                    {(room.settings.bonusRoundChance ?? 0) > 0 && (
+                    </div>
+                    
+                    {/* Questions per Round */}
+                    <div className="glass rounded-xl p-3 text-center">
+                      <div className="flex items-center justify-center gap-2 mb-1">
+                        <HelpCircle className="w-4 h-4 text-primary" />
+                        <span className="text-xs text-muted-foreground">Fragen/Runde</span>
+                      </div>
                       <motion.span 
-                        key={room.settings.bonusRoundChance}
-                        initial={{ scale: 0 }}
-                        animate={{ scale: 1 }}
-                        className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1"
+                        key={room.settings.questionsPerRound}
+                        initial={{ scale: 0.8, opacity: 0 }}
+                        animate={{ scale: 1, opacity: 1 }}
+                        className="text-2xl font-black text-primary"
                       >
-                        <Percent className="w-3 h-3" />
-                        {room.settings.bonusRoundChance}% Chance
+                        {room.settings.questionsPerRound}
                       </motion.span>
-                    )}
+                    </div>
                   </div>
-                </motion.div>
+                  
+                  {/* Bonus Round Settings */}
+                  {(room.settings.finalRoundAlwaysBonus || (room.settings.bonusRoundChance ?? 0) > 0) && (
+                    <motion.div 
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="mt-3 pt-3 border-t border-border/50"
+                    >
+                      <div className="flex items-center gap-2 mb-2">
+                        <Gift className="w-4 h-4 text-amber-500" />
+                        <span className="text-xs text-amber-500 font-semibold">Bonusrunden</span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {room.settings.finalRoundAlwaysBonus && (
+                          <motion.span 
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1"
+                          >
+                            <Trophy className="w-3 h-3" />
+                            Finale = Bonus
+                          </motion.span>
+                        )}
+                        {(room.settings.bonusRoundChance ?? 0) > 0 && (
+                          <motion.span 
+                            key={room.settings.bonusRoundChance}
+                            initial={{ scale: 0 }}
+                            animate={{ scale: 1 }}
+                            className="text-xs px-2 py-1 rounded-full bg-amber-500/20 text-amber-400 flex items-center gap-1"
+                          >
+                            <Percent className="w-3 h-3" />
+                            {room.settings.bonusRoundChance}% Chance
+                          </motion.span>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </>
               )}
             </div>
             

@@ -10,3 +10,4 @@ export {
   DEFAULT_AVATAR_OPTIONS,
   type DylanAvatarOptions,
 } from './AvatarCustomizer';
+export { CustomGameConfigurator } from './CustomGameConfigurator';

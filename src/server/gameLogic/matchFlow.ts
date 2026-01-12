@@ -37,7 +37,8 @@ import {
   startRPSDuel,
 } from './categorySelection';
 import { startBonusRound } from './bonusRound';
-import { IMPLEMENTED_BONUS_TYPES_DATA } from '@/config/gameModes.shared';
+import { IMPLEMENTED_BONUS_TYPES_DATA, selectRandomCategoryMode } from '@/config/gameModes.shared';
+import type { CustomRoundConfig, RoundType } from '@/config/customGame.shared';
 
 const dev = process.env.NODE_ENV !== 'production';
 
@@ -101,141 +102,148 @@ function selectBonusType(room: GameRoom): string {
 }
 
 // ============================================
-// START CATEGORY SELECTION (Main Entry Point)
+// CUSTOM GAME MODE HELPERS
 // ============================================
 
 /**
- * Startet die Kategorie-Auswahl für eine Runde
- * Dies ist der Haupt-Entry-Point für jede Runde
+ * Startet eine spezifische Bonusrunde nach Typ
  */
-export async function startCategorySelection(room: GameRoom, io: SocketServer): Promise<void> {
-  // === RUNDENERHÖHUNG ===
-  const comingFromScoreboard = room.state.phase === 'scoreboard';
+async function startBonusRoundByType(
+  room: GameRoom, 
+  io: SocketServer, 
+  bonusType: 'hot_button' | 'collective_list'
+): Promise<boolean> {
+  const excludeIds = Array.from(room.state.usedBonusQuestionIds);
+  const hotButtonCount = room.settings.hotButtonQuestionsPerRound || 5;
   
-  if (comingFromScoreboard) {
-    room.state.currentRound++;
-    console.log(`📈 Round incremented to ${room.state.currentRound}/${room.settings.maxRounds}`);
+  // Load appropriate bonus round question from DB
+  const loader = BONUS_QUESTION_LOADERS[bonusType];
+  const bonusQuestion = loader ? await loader(excludeIds, hotButtonCount) : null;
+  
+  if (!bonusQuestion) {
+    console.log(`⚠️ No ${bonusType} questions available`);
+    return false;
   }
   
-  // === PRÜFEN OB SPIEL VORBEI ===
-  if (room.state.currentRound > room.settings.maxRounds) {
-    console.log(`🏁 All ${room.settings.maxRounds} rounds completed, showing final results`);
-    showFinalResults(room, io);
-    return;
+  // Add all used question IDs to the set
+  if (bonusQuestion.questionIds) {
+    bonusQuestion.questionIds.forEach((id: string) => room.state.usedBonusQuestionIds.add(id));
+  } else if (bonusQuestion.id) {
+    room.state.usedBonusQuestionIds.add(bonusQuestion.id);
   }
-
-  // === BONUSRUNDEN-LOGIK ===
-  const isLastRound = room.state.currentRound === room.settings.maxRounds;
-  const chanceTriggered = room.settings.bonusRoundChance > 0 && Math.random() * 100 < room.settings.bonusRoundChance;
-  const shouldBeBonusRound = (isLastRound && room.settings.finalRoundAlwaysBonus) || chanceTriggered;
   
-  console.log(`🎮 Round ${room.state.currentRound}/${room.settings.maxRounds} - isLastRound: ${isLastRound}, chanceTriggered: ${chanceTriggered}, shouldBeBonusRound: ${shouldBeBonusRound}`);
+  // Mark this type as used for variety tracking
+  room.state.usedBonusTypes.add(bonusType);
+  console.log(`✅ Bonus type '${bonusType}' marked as used. Total used: ${room.state.usedBonusTypes.size}`);
+  
+  // Show bonus round announcement with roulette
+  room.state.phase = 'bonus_round_announcement';
+  room.state.categorySelectionMode = null;
+  room.state.selectedBonusType = bonusType;
+  
+  // Store pending question
+  room.pendingBonusQuestion = {
+    type: bonusQuestion.type || 'collective_list',
+    id: bonusQuestion.id,
+    topic: bonusQuestion.topic,
+    description: bonusQuestion.description,
+    category: bonusQuestion.category,
+    categoryIcon: bonusQuestion.categoryIcon,
+    questionType: bonusQuestion.questionType,
+    items: bonusQuestion.items,
+    timePerTurn: bonusQuestion.timePerTurn,
+    pointsPerCorrect: bonusQuestion.pointsPerCorrect,
+    fuzzyThreshold: bonusQuestion.fuzzyThreshold,
+    questions: bonusQuestion.questions,
+    buzzerTimeout: bonusQuestion.buzzerTimeout,
+    answerTimeout: bonusQuestion.answerTimeout,
+    allowRebuzz: bonusQuestion.allowRebuzz,
+    maxRebuzzAttempts: bonusQuestion.maxRebuzzAttempts,
+  };
+  
+  emitPhaseChange(room, io, 'bonus_round_announcement');
+  broadcastRoomUpdate(room, io);
+  
+  // After roulette animation, start bonus round
+  const roomCode = room.code;
+  setTimeout(() => {
+    const currentRoom = getRoom(roomCode);
+    if (!currentRoom || currentRoom.state.phase !== 'bonus_round_announcement') return;
+    
+    const pendingQuestion = currentRoom.pendingBonusQuestion;
+    delete currentRoom.pendingBonusQuestion;
+    
+    if (pendingQuestion) {
+      startBonusRound(currentRoom, io, pendingQuestion);
+    }
+  }, UI_TIMING.WHEEL_ANIMATION);
+  
+  return true;
+}
 
-  if (shouldBeBonusRound) {
-    console.log(`🎯 Round ${room.state.currentRound}: BONUS ROUND triggered!`);
-    
-    // Smart selection: Choose bonus type that hasn't been played yet
-    const selectedBonusType = selectBonusType(room);
-    console.log(`🎰 Selected bonus type: ${selectedBonusType} (used: [${Array.from(room.state.usedBonusTypes).join(', ')}])`);
-    
-    // Load appropriate bonus round question from DB
-    const excludeIds = Array.from(room.state.usedBonusQuestionIds);
-    const hotButtonCount = room.settings.hotButtonQuestionsPerRound || 5;
-    
-    // Use strategy pattern for loading questions
-    const loader = BONUS_QUESTION_LOADERS[selectedBonusType];
-    let bonusQuestion = loader ? await loader(excludeIds, hotButtonCount) : null;
-    
-    // Fallback: If selected type not available, try other types
-    if (!bonusQuestion) {
-      console.log(`⚠️ No ${selectedBonusType} questions available, trying fallback...`);
-      const otherTypes = IMPLEMENTED_BONUS_TYPES_DATA.filter(t => t.id !== selectedBonusType);
-      
-      for (const type of otherTypes) {
-        const fallbackLoader = BONUS_QUESTION_LOADERS[type.id];
-        if (fallbackLoader) {
-          bonusQuestion = await fallbackLoader(excludeIds, hotButtonCount);
-          if (bonusQuestion) {
-            console.log(`✅ Fallback successful: Using ${type.id}`);
-            break;
-          }
-        }
+/**
+ * Startet eine Custom-Runde basierend auf der Konfiguration
+ */
+async function startCustomRound(
+  room: GameRoom, 
+  io: SocketServer, 
+  roundConfig: CustomRoundConfig
+): Promise<void> {
+  console.log(`🎮 Starting custom round: type=${roundConfig.type}, categoryMode=${roundConfig.categoryMode || 'N/A'}`);
+  
+  switch (roundConfig.type) {
+    case 'hot_button': {
+      const success = await startBonusRoundByType(room, io, 'hot_button');
+      if (!success) {
+        console.log(`⚠️ Hot Button not available, falling back to question round`);
+        await startQuestionRound(room, io, 'random');
       }
+      break;
     }
     
-    if (bonusQuestion) {
-      // Add all used question IDs to the set
-      if (bonusQuestion.questionIds) {
-        bonusQuestion.questionIds.forEach((id: string) => room.state.usedBonusQuestionIds.add(id));
-      } else if (bonusQuestion.id) {
-        room.state.usedBonusQuestionIds.add(bonusQuestion.id);
+    case 'collective_list': {
+      const success = await startBonusRoundByType(room, io, 'collective_list');
+      if (!success) {
+        console.log(`⚠️ Collective List not available, falling back to question round`);
+        await startQuestionRound(room, io, 'random');
       }
-      
-      // Determine bonus type from questionType
-      const bonusType = bonusQuestion.questionType === 'HOT_BUTTON' ? 'hot_button' : 'collective_list';
-      
-      // Mark this type as used for variety tracking
-      room.state.usedBonusTypes.add(bonusType);
-      console.log(`✅ Bonus type '${bonusType}' marked as used. Total used: ${room.state.usedBonusTypes.size}`);
-      
-      // Show bonus round announcement with roulette
-      room.state.phase = 'bonus_round_announcement';
-      room.state.categorySelectionMode = null;
-      room.state.selectedBonusType = bonusType; // Set for roulette display
-      
-      // Store pending question
-      room.pendingBonusQuestion = {
-        type: bonusQuestion.type || 'collective_list',
-        id: bonusQuestion.id,
-        topic: bonusQuestion.topic,
-        description: bonusQuestion.description,
-        category: bonusQuestion.category,
-        categoryIcon: bonusQuestion.categoryIcon,
-        questionType: bonusQuestion.questionType,
-        items: bonusQuestion.items,
-        timePerTurn: bonusQuestion.timePerTurn,
-        pointsPerCorrect: bonusQuestion.pointsPerCorrect,
-        fuzzyThreshold: bonusQuestion.fuzzyThreshold,
-        // Hot Button specific fields
-        questions: bonusQuestion.questions,
-        buzzerTimeout: bonusQuestion.buzzerTimeout,
-        answerTimeout: bonusQuestion.answerTimeout,
-        allowRebuzz: bonusQuestion.allowRebuzz,
-        maxRebuzzAttempts: bonusQuestion.maxRebuzzAttempts,
-      };
-      
-      emitPhaseChange(room, io, 'bonus_round_announcement');
-      broadcastRoomUpdate(room, io);
-      
-      // After roulette animation, start bonus round
-      const roomCode = room.code;
-      setTimeout(() => {
-        const currentRoom = getRoom(roomCode);
-        if (!currentRoom || currentRoom.state.phase !== 'bonus_round_announcement') return;
-        
-        const pendingQuestion = currentRoom.pendingBonusQuestion;
-        delete currentRoom.pendingBonusQuestion;
-        
-        if (pendingQuestion) {
-          startBonusRound(currentRoom, io, pendingQuestion);
-        }
-      }, UI_TIMING.WHEEL_ANIMATION);
-      
-      return;
-    } else {
-      console.log(`⚠️ No bonus round question found in DB, falling back to normal round`);
+      break;
+    }
+    
+    case 'question_round':
+    default: {
+      await startQuestionRound(room, io, roundConfig.categoryMode || 'random');
+      break;
     }
   }
+}
 
-  // === NORMALE RUNDE ===
-  const mode = selectCategoryMode(room);
-  room.state.categorySelectionMode = mode;
+/**
+ * Startet eine normale Fragerunde mit dem angegebenen Kategorie-Modus
+ */
+async function startQuestionRound(
+  room: GameRoom, 
+  io: SocketServer, 
+  categoryMode: string
+): Promise<void> {
+  // Kategorie-Modus bestimmen
+  let mode: string;
+  
+  if (categoryMode === 'random') {
+    // Nutze die standard zufällige Auswahl
+    mode = selectCategoryMode(room);
+  } else {
+    // Erzwinge den spezifischen Modus
+    mode = categoryMode;
+  }
+  
+  room.state.categorySelectionMode = mode as any;
   room.state.votingCategories = await getRandomCategoriesForVoting(room, 8);
   room.state.categoryVotes = new Map();
   room.state.selectedCategory = null;
   room.state.loserPickPlayerId = null;
 
-  console.log(`🎲 Round ${room.state.currentRound}: Category mode = ${mode}`);
+  console.log(`🎲 Round ${room.state.currentRound}: Category mode = ${mode} (requested: ${categoryMode})`);
 
   // First show announcement
   room.state.phase = 'category_announcement';
@@ -286,6 +294,94 @@ export async function startCategorySelection(room: GameRoom, io: SocketServer): 
         startCategoryVoting(currentRoom, io);
     }
   }, UI_TIMING.WHEEL_ANIMATION);
+}
+
+// ============================================
+// START CATEGORY SELECTION (Main Entry Point)
+// ============================================
+
+/**
+ * Startet die Kategorie-Auswahl für eine Runde
+ * Dies ist der Haupt-Entry-Point für jede Runde
+ * 
+ * Unterstützt sowohl Standard-Modus als auch Custom Game Mode
+ */
+export async function startCategorySelection(room: GameRoom, io: SocketServer): Promise<void> {
+  // === RUNDENERHÖHUNG ===
+  const comingFromScoreboard = room.state.phase === 'scoreboard';
+  
+  if (comingFromScoreboard) {
+    room.state.currentRound++;
+    console.log(`📈 Round incremented to ${room.state.currentRound}/${room.settings.maxRounds}`);
+  }
+  
+  // === CUSTOM GAME MODE ===
+  if (room.settings.customMode && room.settings.customRounds?.length > 0) {
+    const totalCustomRounds = room.settings.customRounds.length;
+    
+    // Prüfen ob Spiel vorbei
+    if (room.state.currentRound > totalCustomRounds) {
+      console.log(`🏁 All ${totalCustomRounds} custom rounds completed, showing final results`);
+      showFinalResults(room, io);
+      return;
+    }
+    
+    // Die aktuelle Rundenkonfiguration holen (0-indexed)
+    const currentRoundConfig = room.settings.customRounds[room.state.currentRound - 1];
+    console.log(`🎯 Custom Mode: Round ${room.state.currentRound}/${totalCustomRounds} - ${currentRoundConfig.type}`);
+    
+    await startCustomRound(room, io, currentRoundConfig);
+    return;
+  }
+  
+  // === STANDARD MODE ===
+  
+  // Prüfen ob Spiel vorbei
+  if (room.state.currentRound > room.settings.maxRounds) {
+    console.log(`🏁 All ${room.settings.maxRounds} rounds completed, showing final results`);
+    showFinalResults(room, io);
+    return;
+  }
+
+  // === BONUSRUNDEN-LOGIK (nur Standard-Modus) ===
+  const isLastRound = room.state.currentRound === room.settings.maxRounds;
+  const chanceTriggered = room.settings.bonusRoundChance > 0 && Math.random() * 100 < room.settings.bonusRoundChance;
+  const shouldBeBonusRound = (isLastRound && room.settings.finalRoundAlwaysBonus) || chanceTriggered;
+  
+  console.log(`🎮 Round ${room.state.currentRound}/${room.settings.maxRounds} - isLastRound: ${isLastRound}, chanceTriggered: ${chanceTriggered}, shouldBeBonusRound: ${shouldBeBonusRound}`);
+
+  if (shouldBeBonusRound) {
+    console.log(`🎯 Round ${room.state.currentRound}: BONUS ROUND triggered!`);
+    
+    // Smart selection: Choose bonus type that hasn't been played yet
+    const selectedBonusType = selectBonusType(room) as 'hot_button' | 'collective_list';
+    console.log(`🎰 Selected bonus type: ${selectedBonusType} (used: [${Array.from(room.state.usedBonusTypes).join(', ')}])`);
+    
+    // Try to start the selected bonus round
+    const success = await startBonusRoundByType(room, io, selectedBonusType);
+    
+    if (success) {
+      return;
+    }
+    
+    // Fallback: Try other bonus types
+    console.log(`⚠️ No ${selectedBonusType} questions available, trying fallback...`);
+    const otherTypes = IMPLEMENTED_BONUS_TYPES_DATA.filter(t => t.id !== selectedBonusType);
+    
+    for (const type of otherTypes) {
+      const fallbackSuccess = await startBonusRoundByType(room, io, type.id as 'hot_button' | 'collective_list');
+      if (fallbackSuccess) {
+        console.log(`✅ Fallback successful: Using ${type.id}`);
+        return;
+      }
+    }
+    
+    console.log(`⚠️ No bonus round questions found in DB, falling back to normal round`);
+  }
+
+  // === NORMALE RUNDE ===
+  // Nutze die startQuestionRound Hilfsfunktion für konsistentes Verhalten
+  await startQuestionRound(room, io, 'random');
 }
 
 // ============================================

@@ -41,6 +41,7 @@ import {
   UI_TIMING,
   ROOM_LIMITS,
 } from '@/config/constants';
+import { validateCustomRounds } from '@/config/customGame.shared';
 
 // Game Logic Imports
 import {
@@ -283,6 +284,20 @@ function handleUpdateSettings(io: SocketServer) {
 
     const player = room.players.get(data.playerId);
     if (!player?.isHost) return;
+
+    // Validate custom rounds if provided
+    if (data.settings.customRounds) {
+      const validation = validateCustomRounds(data.settings.customRounds);
+      if (!validation.valid) {
+        console.warn(`⚠️ Invalid custom rounds: ${validation.error}`);
+        return; // Don't apply invalid settings
+      }
+    }
+
+    // If switching to custom mode, ensure maxRounds reflects the custom rounds count
+    if (data.settings.customMode && data.settings.customRounds) {
+      data.settings.maxRounds = data.settings.customRounds.length;
+    }
 
     room.settings = { ...room.settings, ...data.settings };
     broadcastRoomUpdate(room, io);

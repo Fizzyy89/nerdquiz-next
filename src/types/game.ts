@@ -6,6 +6,10 @@
 import type { CategorySelectionMode } from '@/config/gameModes.shared';
 export type { CategorySelectionMode };
 
+// Import and re-export CustomRoundConfig from custom game config
+import type { CustomRoundConfig, RoundType } from '@/config/customGame.shared';
+export type { CustomRoundConfig, RoundType };
+
 // ============================================
 // PLAYER
 // ============================================
@@ -241,9 +245,12 @@ export interface GameSettings {
   maxRounds: number;
   questionsPerRound: number;
   timePerQuestion: number;
-  // Bonusrunden-Einstellungen
+  // Bonusrunden-Einstellungen (nur für Standard-Modus relevant)
   bonusRoundChance: number; // 0-100, Wahrscheinlichkeit dass eine Runde zur Bonusrunde wird
   finalRoundAlwaysBonus: boolean; // Letzte Runde immer als Bonusrunde
+  // Custom Game Mode
+  customMode: boolean; // true = benutzerdefinierte Rundenfolge
+  customRounds: CustomRoundConfig[]; // Array der konfigurierten Runden (nur wenn customMode = true)
   // Zukünftige Erweiterungen
   enableEstimation: boolean; // Schätzfragen aktiviert
   enableMediaQuestions: boolean; // Bild/Audio/Video Fragen

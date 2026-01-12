@@ -6,9 +6,10 @@
  */
 
 import type { CategorySelectionMode } from '@/config/gameModes.shared';
+import type { CustomRoundConfig, RoundType } from '@/config/customGame.shared';
 
 // Re-export for convenience
-export type { CategorySelectionMode };
+export type { CategorySelectionMode, CustomRoundConfig, RoundType };
 
 // ============================================
 // QUESTION DATA (from JSON files)
@@ -283,6 +284,10 @@ export interface GameSettings {
   timePerQuestion: number;
   bonusRoundChance: number;
   finalRoundAlwaysBonus: boolean;
+  // Custom Game Mode
+  customMode: boolean; // true = benutzerdefinierte Rundenfolge
+  customRounds: CustomRoundConfig[]; // Array der konfigurierten Runden (nur wenn customMode = true)
+  // Feature flags
   enableEstimation: boolean;
   enableMediaQuestions: boolean;
   hotButtonQuestionsPerRound: number; // Anzahl Fragen pro Hot Button Runde (default: 5)
@@ -476,6 +481,10 @@ export const DEFAULT_GAME_SETTINGS: GameSettings = {
   timePerQuestion: 20,
   bonusRoundChance: 0,
   finalRoundAlwaysBonus: true, // Standard: Letzte Runde ist immer Bonusrunde
+  // Custom Game Mode defaults
+  customMode: false,
+  customRounds: [],
+  // Feature flags
   enableEstimation: true,
   enableMediaQuestions: false,
   hotButtonQuestionsPerRound: 5, // Standard: 5 Fragen pro Hot Button Runde
