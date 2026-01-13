@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { motion, AnimatePresence, Reorder } from 'framer-motion';
+import { motion, AnimatePresence, Reorder, useDragControls } from 'framer-motion';
 import {
   Plus,
   X,
@@ -103,6 +103,7 @@ function RoundNode({
   onRemove,
   onTypeChange,
   onCategoryModeChange,
+  dragControls,
 }: {
   round: CustomRoundConfig;
   index: number;
@@ -112,6 +113,7 @@ function RoundNode({
   onRemove: () => void;
   onTypeChange: (type: RoundType) => void;
   onCategoryModeChange: (mode: CategorySelectionMode | 'random') => void;
+  dragControls: ReturnType<typeof useDragControls>;
 }) {
   const roundType = ROUND_TYPE_DATA_MAP.get(round.type);
   const [showTypeMenu, setShowTypeMenu] = useState(false);
@@ -144,9 +146,7 @@ function RoundNode({
       style={{ zIndex: showTypeMenu ? 50 : 1 }}
     >
       {/* Main Node */}
-      <motion.div
-        whileHover={{ scale: 1.01 }}
-        whileTap={{ scale: 0.99 }}
+      <div
         onClick={onSelect}
         className={`relative flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all ${
           isSelected 
@@ -154,9 +154,12 @@ function RoundNode({
             : 'bg-muted/50 hover:bg-muted'
         }`}
       >
-        {/* Drag Handle */}
-        <div className="cursor-grab active:cursor-grabbing text-muted-foreground/50">
-          <GripVertical className="w-4 h-4" />
+        {/* Drag Handle - Only this area triggers drag */}
+        <div 
+          className="cursor-grab active:cursor-grabbing text-muted-foreground/50 p-1 -m-1 touch-none"
+          onPointerDown={(e) => dragControls.start(e)}
+        >
+          <GripVertical className="w-5 h-5" />
         </div>
         
         {/* Round Number & Icon */}
@@ -235,7 +238,7 @@ function RoundNode({
             <X className="w-4 h-4" />
           </button>
         )}
-      </motion.div>
+      </div>
       
       {/* Expanded Options for Question Rounds */}
       <AnimatePresence>
@@ -268,6 +271,61 @@ function RoundNode({
         )}
       </AnimatePresence>
     </motion.div>
+  );
+}
+
+// ============================================
+// DRAGGABLE ROUND ITEM WRAPPER
+// ============================================
+
+function DraggableRoundItem({
+  round,
+  index,
+  totalRounds,
+  isSelected,
+  onSelect,
+  onRemove,
+  onTypeChange,
+  onCategoryModeChange,
+  showAddButton,
+  onAddAt,
+}: {
+  round: CustomRoundConfig;
+  index: number;
+  totalRounds: number;
+  isSelected: boolean;
+  onSelect: () => void;
+  onRemove: () => void;
+  onTypeChange: (type: RoundType) => void;
+  onCategoryModeChange: (mode: CategorySelectionMode | 'random') => void;
+  showAddButton: boolean;
+  onAddAt: (type: RoundType) => void;
+}) {
+  const dragControls = useDragControls();
+
+  return (
+    <Reorder.Item 
+      key={round.id} 
+      value={round}
+      dragListener={false}
+      dragControls={dragControls}
+    >
+      <RoundNode
+        round={round}
+        index={index}
+        totalRounds={totalRounds}
+        isSelected={isSelected}
+        onSelect={onSelect}
+        onRemove={onRemove}
+        onTypeChange={onTypeChange}
+        onCategoryModeChange={onCategoryModeChange}
+        dragControls={dragControls}
+      />
+      {/* Add between nodes */}
+      {showAddButton && (
+        <AddRoundButton onAdd={onAddAt} />
+      )}
+    </Reorder.Item>
   );
 }
 
@@ -597,22 +655,19 @@ function ConfiguratorContent({
               className="space-y-1"
             >
               {rounds.map((round, index) => (
-                <Reorder.Item key={round.id} value={round}>
-                  <RoundNode
-                    round={round}
-                    index={index}
-                    totalRounds={rounds.length}
-                    isSelected={selectedIndex === index}
-                    onSelect={() => setSelectedIndex(selectedIndex === index ? null : index)}
-                    onRemove={() => handleRemove(index)}
-                    onTypeChange={(type) => handleTypeChange(index, type)}
-                    onCategoryModeChange={(mode) => handleCategoryModeChange(index, mode)}
-                  />
-                  {/* Add between nodes */}
-                  {index < rounds.length - 1 && rounds.length < 20 && (
-                    <AddRoundButton onAdd={(type) => handleAddAt(index + 1, type)} />
-                  )}
-                </Reorder.Item>
+                <DraggableRoundItem
+                  key={round.id}
+                  round={round}
+                  index={index}
+                  totalRounds={rounds.length}
+                  isSelected={selectedIndex === index}
+                  onSelect={() => setSelectedIndex(selectedIndex === index ? null : index)}
+                  onRemove={() => handleRemove(index)}
+                  onTypeChange={(type) => handleTypeChange(index, type)}
+                  onCategoryModeChange={(mode) => handleCategoryModeChange(index, mode)}
+                  showAddButton={index < rounds.length - 1 && rounds.length < 20}
+                  onAddAt={(type) => handleAddAt(index + 1, type)}
+                />
               ))}
             </Reorder.Group>
             
