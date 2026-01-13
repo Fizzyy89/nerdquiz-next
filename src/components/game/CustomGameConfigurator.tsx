@@ -421,23 +421,14 @@ function GameSummary({ rounds, questionsPerRound }: { rounds: CustomRoundConfig[
   );
 
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-      <div className="p-2 rounded-lg bg-muted/30">
-        <span className="text-lg font-bold text-primary">{rounds.length}</span>
-        <p className="text-xs text-muted-foreground">Runden</p>
-      </div>
-      <div className="p-2 rounded-lg bg-muted/30">
-        <span className="text-lg font-bold text-primary">{totalQuestions}</span>
-        <p className="text-xs text-muted-foreground">Fragen</p>
-      </div>
-      <div className="p-2 rounded-lg bg-muted/30">
-        <span className="text-lg font-bold text-amber-500">{hotButtonRounds + collectiveListRounds}</span>
-        <p className="text-xs text-muted-foreground">Bonus</p>
-      </div>
-      <div className="p-2 rounded-lg bg-muted/30">
-        <span className="text-lg font-bold text-primary">~{estimatedMinutes}</span>
-        <p className="text-xs text-muted-foreground">Minuten</p>
-      </div>
+    <div className="flex items-center justify-center gap-3 py-2 px-3 rounded-lg bg-muted/30 text-xs sm:text-sm">
+      <span><span className="font-bold text-primary">{rounds.length}</span> Runden</span>
+      <span className="text-muted-foreground/50">·</span>
+      <span><span className="font-bold text-primary">{totalQuestions}</span> Fragen</span>
+      <span className="text-muted-foreground/50">·</span>
+      <span><span className="font-bold text-amber-500">{hotButtonRounds + collectiveListRounds}</span> Bonus</span>
+      <span className="text-muted-foreground/50 hidden sm:inline">·</span>
+      <span className="hidden sm:inline">~{estimatedMinutes} Min</span>
     </div>
   );
 }
@@ -752,18 +743,15 @@ export function CustomGameConfigurator({
   
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="h-[95vh] max-h-[95vh] flex flex-col">
-        <DrawerHeader className="flex-shrink-0 pb-2">
-          <DrawerTitle className="flex items-center justify-center gap-2">
-            <Settings2 className="w-5 h-5 text-primary" />
+      <DrawerContent className="max-h-[90vh] flex flex-col">
+        <DrawerHeader className="flex-shrink-0 py-3">
+          <DrawerTitle className="flex items-center justify-center gap-2 text-base">
+            <Settings2 className="w-4 h-4 text-primary" />
             Spielablauf anpassen
           </DrawerTitle>
-          <DrawerDescription className="text-center text-xs">
-            Erstelle deine eigene Rundenfolge
-          </DrawerDescription>
         </DrawerHeader>
         
-        <div className="px-4 flex-1 min-h-0 overflow-hidden pb-2">
+        <div className="px-4 flex-1 min-h-0 overflow-hidden">
           {content}
         </div>
         
