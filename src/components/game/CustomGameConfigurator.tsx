@@ -743,7 +743,7 @@ export function CustomGameConfigurator({
   
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[90vh] flex flex-col">
+      <DrawerContent className="h-[85vh] flex flex-col">
         <DrawerHeader className="flex-shrink-0 py-3">
           <DrawerTitle className="flex items-center justify-center gap-2 text-base">
             <Settings2 className="w-4 h-4 text-primary" />
@@ -755,7 +755,7 @@ export function CustomGameConfigurator({
           {content}
         </div>
         
-        <DrawerFooter className="flex-shrink-0 pt-2">
+        <DrawerFooter className="flex-shrink-0 pt-2 pb-6">
           <Button onClick={() => onOpenChange(false)} className="gap-2">
             <Check className="w-4 h-4" />
             Fertig
