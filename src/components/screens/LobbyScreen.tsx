@@ -479,7 +479,17 @@ export function LobbyScreen() {
   };
 
   const canStart = room.players.length >= 1;
-  const emptySlots = Math.max(0, 8 - room.players.length);
+  
+  // 4 slots on mobile, 8 on desktop - use media query
+  const [isDesktop, setIsDesktop] = useState(false);
+  useEffect(() => {
+    const checkDesktop = () => setIsDesktop(window.innerWidth >= 768);
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
+  const maxSlots = isDesktop ? 8 : 4;
+  const emptySlots = Math.max(0, maxSlots - room.players.length);
 
   return (
     <motion.div
@@ -539,8 +549,8 @@ export function LobbyScreen() {
                 {room.players.length} Spieler
               </span>
               {room.players.length < 2 && (
-                <span className="text-xs text-amber-500 ml-auto">
-                  Mind. 2 zum Starten
+                <span className="text-xs text-muted-foreground ml-auto">
+                  2 empfohlen · Solo möglich
                 </span>
               )}
             </div>

@@ -156,8 +156,13 @@ function RoundNode({
       >
         {/* Drag Handle - Only this area triggers drag */}
         <div 
-          className="cursor-grab active:cursor-grabbing text-muted-foreground/50 p-1 -m-1 touch-none"
-          onPointerDown={(e) => dragControls.start(e)}
+          className="cursor-grab active:cursor-grabbing text-muted-foreground/50 p-2 -m-1 touch-none select-none"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dragControls.start(e);
+          }}
+          onTouchStart={(e) => e.stopPropagation()}
         >
           <GripVertical className="w-5 h-5" />
         </div>
@@ -226,14 +231,14 @@ function RoundNode({
           </AnimatePresence>
         </div>
         
-        {/* Remove Button */}
+        {/* Remove Button - Always visible on mobile */}
         {totalRounds > 1 && (
           <button
             onClick={(e) => {
               e.stopPropagation();
               onRemove();
             }}
-            className="p-1.5 rounded-lg opacity-0 group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
+            className="p-1.5 rounded-lg md:opacity-0 md:group-hover:opacity-100 hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-all"
           >
             <X className="w-4 h-4" />
           </button>
@@ -333,7 +338,7 @@ function DraggableRoundItem({
 // ADD ROUND BUTTON (With Labels)
 // ============================================
 
-function AddRoundButton({ onAdd, isLast = false }: { onAdd: (type: RoundType) => void; isLast?: boolean }) {
+function AddRoundButton({ onAdd }: { onAdd: (type: RoundType) => void }) {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -367,10 +372,10 @@ function AddRoundButton({ onAdd, isLast = false }: { onAdd: (type: RoundType) =>
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: isLast ? 10 : -10 }}
+            initial={{ opacity: 0, scale: 0.95, y: -10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95 }}
-            className={`absolute left-1/2 -translate-x-1/2 ${isLast ? 'bottom-full mb-2' : 'top-full mt-2'} z-50 p-2 rounded-xl bg-background border shadow-2xl`}
+            className="absolute left-1/2 -translate-x-1/2 top-full mt-2 z-50 p-2 rounded-xl bg-background border shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex gap-2">
@@ -486,16 +491,16 @@ function Templates({ onApply }: { onApply: (template: string) => void }) {
   ];
 
   return (
-    <div className="flex gap-2">
-      <span className="text-xs text-muted-foreground self-center">Schnellstart:</span>
+    <div className="flex gap-1.5 sm:gap-2 flex-wrap">
+      <span className="text-xs text-muted-foreground self-center hidden sm:inline">Schnellstart:</span>
       {templates.map((t) => (
         <button
           key={t.id}
           onClick={() => onApply(t.id)}
-          className="px-2.5 py-1.5 text-xs rounded-lg bg-muted/50 hover:bg-muted transition-colors flex items-center gap-1.5"
+          className="px-2 py-1.5 sm:px-2.5 text-xs rounded-lg bg-muted/50 hover:bg-muted active:bg-muted/80 transition-colors flex items-center gap-1 sm:gap-1.5 min-h-[32px]"
           title={t.desc}
         >
-          <span>{t.emoji}</span>
+          <span className="text-sm">{t.emoji}</span>
           <span className="hidden sm:inline">{t.name}</span>
         </button>
       ))}
@@ -671,9 +676,9 @@ function ConfiguratorContent({
               ))}
             </Reorder.Group>
             
-            {/* Add at end - opens upward */}
+            {/* Add at end */}
             {rounds.length < 20 && rounds.length > 0 && (
-              <AddRoundButton onAdd={handleAddEnd} isLast={true} />
+              <AddRoundButton onAdd={handleAddEnd} />
             )}
           </div>
         </div>
