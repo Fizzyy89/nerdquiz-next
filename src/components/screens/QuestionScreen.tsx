@@ -6,7 +6,7 @@ import { Clock, Users, Zap, Check, X, Flame, Crown, Info } from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, usePlayers, useCurrentPlayer, useIsHost, useMyResult } from '@/store/gameStore';
 import { Card } from '@/components/ui/card';
-import { Leaderboard } from '@/components/game/Leaderboard';
+import { Leaderboard, useGameTimer } from '@/components/game';
 import { GameAvatar, getMoodForContext, type AvatarMood } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { AnswerResult, Player } from '@/types/game';
@@ -36,7 +36,6 @@ export function QuestionScreen() {
   const isHost = useIsHost();
   const myResult = useMyResult();
   
-  const [timeLeft, setTimeLeft] = useState(0);
   const [revealPhase, setRevealPhase] = useState<RevealPhase>('answering');
   const [flyingIndex, setFlyingIndex] = useState(-1);
   const [showPointsFor, setShowPointsFor] = useState<Set<string>>(new Set());
@@ -55,6 +54,12 @@ export function QuestionScreen() {
   const question = room?.currentQuestion;
   const answeredCount = players.filter(p => p.hasAnswered).length;
   const isRevealing = room?.phase === 'revealing';
+
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(
+    isRevealing ? null : room?.timerEnd ?? null,
+    room?.serverTime
+  );
 
   // Sort results by answer order
   const sortedByAnswerOrder = useMemo(() => {
@@ -134,18 +139,6 @@ export function QuestionScreen() {
     window.addEventListener('resize', updateRect);
     return () => window.removeEventListener('resize', updateRect);
   }, []);
-
-  // Timer
-  useEffect(() => {
-    if (!room?.timerEnd || isRevealing) return;
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [room?.timerEnd, isRevealing]);
 
   // Track scores during answering phase (before reveal updates them)
   useEffect(() => {

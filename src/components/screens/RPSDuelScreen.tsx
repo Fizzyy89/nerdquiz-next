@@ -7,6 +7,7 @@ import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import type { RPSChoice } from '@/types/game';
 import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
+import { useGameTimer } from '@/components/game';
 
 // RPS Icons and colors
 const RPS_CONFIG: Record<RPSChoice, { emoji: string; name: string; color: string; beats: RPSChoice }> = {
@@ -49,9 +50,14 @@ export function RPSDuelScreen() {
   const [roundResults, setRoundResults] = useState<RoundResult[]>([]);
   const [lastRoundResult, setLastRoundResult] = useState<RoundResult | null>(null);
   const [winnerId, setWinnerId] = useState<string | null>(null);
-  const [timeLeft, setTimeLeft] = useState(10);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [revealedCategory, setRevealedCategory] = useState<CategorySelectedData | null>(null);
+
+  // Synchronized timer using server time (for choosing/picking phases)
+  const { remaining: timeLeft } = useGameTimer(
+    (phase === 'choosing' || phase === 'picking') ? room?.timerEnd ?? null : null,
+    room?.serverTime
+  );
 
   const categories = room?.votingCategories || [];
   
@@ -192,20 +198,6 @@ export function RPSDuelScreen() {
       socket.off('category_selected', handleCategorySelected);
     };
   }, [playerId]);
-
-  // Timer for choosing/picking phase
-  useEffect(() => {
-    if ((phase !== 'choosing' && phase !== 'picking') || !room?.timerEnd) return;
-
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [phase, room?.timerEnd]);
 
   const handleChoice = (choice: RPSChoice) => {
     if (!isParticipant || myChoice || phase !== 'choosing') return;

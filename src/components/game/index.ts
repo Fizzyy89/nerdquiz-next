@@ -11,3 +11,4 @@ export {
   type DylanAvatarOptions,
 } from './AvatarCustomizer';
 export { CustomGameConfigurator } from './CustomGameConfigurator';
+export { GameTimer, useGameTimer, type GameTimerProps } from './GameTimer';

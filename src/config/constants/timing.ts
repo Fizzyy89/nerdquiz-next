@@ -123,11 +123,14 @@ export const COLLECTIVE_LIST_TIMING = {
   /** Zeit pro Spieler-Zug (15s) */
   TURN_DURATION: 15000,
   
-  /** Delay nach richtiger Antwort (1.5s) */
-  CORRECT_ANSWER_DELAY: 1500,
+  /** Delay nach Antwort für Popup-Anzeige (2.5s) - muss mit Client-Popup übereinstimmen */
+  POPUP_DISPLAY_DELAY: 2500,
   
-  /** Delay nach Elimination (2s) */
-  ELIMINATION_DELAY: 2000,
+  /** Delay nach richtiger Antwort (Popup + kleiner Buffer) */
+  CORRECT_ANSWER_DELAY: 2700,
+  
+  /** Delay nach Elimination (Popup + kleiner Buffer) */
+  ELIMINATION_DELAY: 2700,
   
   /** Finale Auswertung (8s) */
   FINAL_RESULTS: 8000,

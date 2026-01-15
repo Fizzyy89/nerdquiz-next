@@ -7,6 +7,7 @@ import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import { cn } from '@/lib/utils';
 import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
+import { useGameTimer } from '@/components/game';
 
 interface PlayerRollData {
   playerId: string;
@@ -285,10 +286,15 @@ export function DiceRoyaleScreen() {
   const [eliminatedPlayerIds, setEliminatedPlayerIds] = useState<Set<string>>(new Set());
   const [hasRolled, setHasRolled] = useState(false);
   const [isRolling, setIsRolling] = useState(false);
-  const [timeLeft, setTimeLeft] = useState(15);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [revealedCategory, setRevealedCategory] = useState<CategorySelectedData | null>(null);
   const [round, setRound] = useState(1);
+
+  // Synchronized timer using server time (only for picking phase)
+  const { remaining: timeLeft } = useGameTimer(
+    phase === 'picking' ? room?.timerEnd ?? null : null,
+    room?.serverTime
+  );
   
   // Track initial player order to maintain stable positions
   const initialPlayerOrderRef = useRef<string[]>([]);
@@ -439,20 +445,6 @@ export function DiceRoyaleScreen() {
       socket.off('category_selected', handleCategorySelected);
     };
   }, [playerId, players]);
-
-  // Timer for picking phase
-  useEffect(() => {
-    if (phase !== 'picking' || !room?.timerEnd) return;
-
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [phase, room?.timerEnd]);
 
   const handleRoll = () => {
     if (!canRoll) return;

@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import { Clock, Check, Sparkles } from 'lucide-react';
 import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
+import { GameTimer, useGameTimer } from '@/components/game';
+import { GAME_TIMERS } from '@/config/constants';
 
 interface CategoryPosition {
   id: string;
@@ -29,7 +31,6 @@ export function VotingScreen() {
   const room = useGameStore((s) => s.room);
   const playerId = useGameStore((s) => s.playerId);
   
-  const [timeLeft, setTimeLeft] = useState(15);
   const [voted, setVoted] = useState<string | null>(null);
   const categoryRefs = useRef<Map<string, HTMLElement>>(new Map());
   const waitingAreaRef = useRef<HTMLDivElement>(null);
@@ -96,6 +97,9 @@ export function VotingScreen() {
     return () => clearTimeout(interval);
   }, [tiebreakerData, rouletteFinished]);
 
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(room?.timerEnd ?? null, room?.serverTime);
+
   if (!room) return null;
 
   const categories = room.votingCategories;
@@ -103,20 +107,6 @@ export function VotingScreen() {
   const myVote = playerId ? votes[playerId] : null;
   const voteCount = Object.keys(votes).length;
   const players = room.players;
-
-  // Timer
-  useEffect(() => {
-    if (!room.timerEnd) return;
-    
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-    
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [room.timerEnd]);
 
   const handleVote = (categoryId: string) => {
     if (myVote) return;
@@ -230,12 +220,12 @@ export function VotingScreen() {
       exit={{ opacity: 0 }}
       className="min-h-screen flex flex-col p-4 md:p-8 overflow-hidden"
     >
-      {/* Timer Bar */}
+      {/* Timer Bar - synchronized with server time */}
       <div className="fixed top-0 left-0 right-0 h-1 bg-muted z-50">
         <motion.div
           className="h-full bg-gradient-to-r from-primary to-secondary"
           initial={{ width: '100%' }}
-          animate={{ width: `${(timeLeft / 15) * 100}%` }}
+          animate={{ width: `${(timeLeft * 1000 / GAME_TIMERS.CATEGORY_VOTING) * 100}%` }}
           transition={{ duration: 0.1 }}
         />
       </div>

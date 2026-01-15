@@ -392,9 +392,13 @@ export function emitPhaseChange(room: GameRoom, io: SocketServer, phase: string)
 
 /**
  * Emit room update to all clients in the room
+ * Includes serverTime for timer synchronization
  */
 export function broadcastRoomUpdate(room: GameRoom, io: SocketServer): void {
-  io.to(room.code).emit('room_update', roomToClient(room));
+  const roomData = roomToClient(room);
+  // Always include current server time for timer synchronization
+  roomData.serverTime = Date.now();
+  io.to(room.code).emit('room_update', roomData);
 }
 
 // ============================================

@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
+import { useGameTimer } from '@/components/game';
 
 export function FinalScreen() {
   const router = useRouter();
@@ -42,23 +43,12 @@ export function FinalScreen() {
   // Check if we're in rematch voting phase
   const isRematchVoting = room?.phase === 'rematch_voting';
   const rematchVotes = room?.rematchVotes || {};
-  const timerEnd = room?.timerEnd || 0;
   
-  // Calculate time left
-  const [timeLeft, setTimeLeft] = useState(20);
-  
-  useEffect(() => {
-    if (!isRematchVoting || timerEnd === 0) return;
-    
-    const updateTimer = () => {
-      const remaining = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-    
-    updateTimer();
-    const interval = setInterval(updateTimer, 1000);
-    return () => clearInterval(interval);
-  }, [isRematchVoting, timerEnd]);
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(
+    isRematchVoting ? room?.timerEnd ?? null : null,
+    room?.serverTime
+  );
 
   // Show stats after a delay
   useEffect(() => {

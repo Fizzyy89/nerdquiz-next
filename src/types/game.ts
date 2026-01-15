@@ -278,6 +278,8 @@ export interface RoomState {
   showingCorrectAnswer: boolean;
   wheelSelectedIndex: number | null; // Pre-selected wheel index for animation
   rematchVotes: Record<string, 'yes' | 'no'>; // Rematch voting state
+  /** Server-Zeit zum Zeitpunkt des letzten Updates (für Timer-Synchronisation) */
+  serverTime?: number;
 }
 
 // ============================================

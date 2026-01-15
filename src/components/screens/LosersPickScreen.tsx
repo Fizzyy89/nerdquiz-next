@@ -6,6 +6,7 @@ import { Crown, Clock, Sparkles, Check } from 'lucide-react';
 import { useGameStore } from '@/store/gameStore';
 import { getSocket } from '@/lib/socket';
 import { getAvatarUrlFromSeed } from '@/components/game/AvatarCustomizer';
+import { GameTimer, useGameTimer } from '@/components/game';
 
 interface CategorySelectedData {
   categoryId: string;
@@ -17,9 +18,11 @@ interface CategorySelectedData {
 export function LosersPickScreen() {
   const room = useGameStore((s) => s.room);
   const playerId = useGameStore((s) => s.playerId);
-  const [timeLeft, setTimeLeft] = useState(15);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [revealedCategory, setRevealedCategory] = useState<CategorySelectedData | null>(null);
+
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(room?.timerEnd ?? null, room?.serverTime);
 
   const categories = room?.votingCategories || [];
   const isLoser = playerId === room?.loserPickPlayerId;
@@ -40,20 +43,6 @@ export function LosersPickScreen() {
       socket.off('category_selected', handleCategorySelected);
     };
   }, []);
-
-  // Timer
-  useEffect(() => {
-    if (!room?.timerEnd) return;
-
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [room?.timerEnd]);
 
   const handlePick = (categoryId: string) => {
     if (!isLoser || selectedCategory) return;

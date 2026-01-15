@@ -6,6 +6,7 @@ import type { RoomState, AnswerResult, FinalRanking, GameStatistics } from '@/ty
 import { getSocket } from '@/lib/socket';
 import { saveSession, clearSession } from '@/lib/session';
 import { getSavedAvatarOptions, optionsToSeed } from '@/components/game/AvatarCustomizer';
+import { useTimeSync } from './useTimeSync';
 
 export function useSocket() {
   const {
@@ -21,6 +22,10 @@ export function useSocket() {
     resetQuestion,
     reset,
   } = useGameStore();
+
+  // Initialize time synchronization
+  // This runs automatically and keeps the time offset updated
+  useTimeSync();
 
   useEffect(() => {
     const socket = getSocket();

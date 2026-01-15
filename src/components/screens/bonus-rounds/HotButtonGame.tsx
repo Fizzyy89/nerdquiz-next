@@ -7,7 +7,7 @@ import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, usePlayers } from '@/store/gameStore';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Leaderboard } from '@/components/game/Leaderboard';
+import { Leaderboard, GameTimer, useGameTimer } from '@/components/game';
 import { GameAvatar } from '@/components/ui/avatar';
 import { cn } from '@/lib/utils';
 import type { HotButtonBonusRound, HotButtonQuestionResult } from '@/types/game';
@@ -357,18 +357,26 @@ export function HotButtonGame() {
   const players = usePlayers();
 
   const [inputValue, setInputValue] = useState('');
-  const [timeLeft, setTimeLeft] = useState(0);
   const [showHistoryMobile, setShowHistoryMobile] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Determine which timer to use based on phase
+  const hotButton = room?.bonusRound as HotButtonBonusRound | null;
+  const isRevealing = hotButton?.phase === 'question_reveal' || hotButton?.phase === 'buzzer_active';
+  const isAnswering = hotButton?.phase === 'answering';
+  
+  // Get the appropriate timer end based on phase
+  const currentTimerEnd = isRevealing ? hotButton?.buzzerTimerEnd :
+    isAnswering ? hotButton?.answerTimerEnd : null;
+  
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(currentTimerEnd ?? null, room?.serverTime);
   
   // Derive overlay visibility from store state
   const showBuzzerOverlay = hotButtonBuzz !== null;
 
-  const hotButton = room?.bonusRound as HotButtonBonusRound | null;
   const isBuzzed = hotButton?.buzzedPlayerId === playerId;
   const isIntro = hotButton?.phase === 'intro';
-  const isRevealing = hotButton?.phase === 'question_reveal';
-  const isAnswering = hotButton?.phase === 'answering';
   const isResult = hotButton?.phase === 'result';
   const isFinished = hotButton?.phase === 'finished';
 
@@ -400,28 +408,6 @@ export function HotButtonGame() {
   // Hot Button events are now handled centrally in useSocket hook
   // We read hotButtonBuzz and hotButtonEndResult from the store
 
-  // Timer
-  useEffect(() => {
-    if (!hotButton) return;
-
-    const timerEnd = isRevealing ? hotButton.buzzerTimerEnd :
-      isAnswering ? hotButton.answerTimerEnd : null;
-
-    if (!timerEnd) {
-      setTimeLeft(0);
-      return;
-    }
-
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((timerEnd - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [hotButton, isRevealing, isAnswering]);
-
   // Auto-focus input when buzzed
   useEffect(() => {
     if (isBuzzed && isAnswering && inputRef.current && !showBuzzerOverlay) {
@@ -450,8 +436,42 @@ export function HotButtonGame() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="min-h-screen p-4 sm:p-6"
+      className="min-h-screen p-4 sm:p-6 relative"
     >
+      {/* Pulsierender Rand wenn man gebuzzert hat und antworten muss */}
+      <AnimatePresence>
+        {isBuzzed && isAnswering && !showBuzzerOverlay && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 pointer-events-none z-40"
+          >
+            {/* Animierter Rahmen */}
+            <motion.div
+              animate={{
+                boxShadow: [
+                  'inset 0 0 20px 5px rgba(245, 158, 11, 0.3)',
+                  'inset 0 0 40px 10px rgba(245, 158, 11, 0.5)',
+                  'inset 0 0 20px 5px rgba(245, 158, 11, 0.3)',
+                ],
+              }}
+              transition={{
+                duration: 1.5,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              }}
+              className="absolute inset-0 rounded-none"
+            />
+            {/* Ecken-Akzente */}
+            <div className="absolute top-0 left-0 w-16 h-16 border-t-4 border-l-4 border-amber-500 rounded-tl-lg" />
+            <div className="absolute top-0 right-0 w-16 h-16 border-t-4 border-r-4 border-amber-500 rounded-tr-lg" />
+            <div className="absolute bottom-0 left-0 w-16 h-16 border-b-4 border-l-4 border-amber-500 rounded-bl-lg" />
+            <div className="absolute bottom-0 right-0 w-16 h-16 border-b-4 border-r-4 border-amber-500 rounded-br-lg" />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Buzzer Overlay */}
       <AnimatePresence>
         {showBuzzerOverlay && hotButtonBuzz && (

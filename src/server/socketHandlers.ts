@@ -41,6 +41,7 @@ import {
   UI_TIMING,
   ROOM_LIMITS,
 } from '@/config/constants';
+import { handleTimeSyncRequest } from './timerSync';
 import { validateCustomRounds } from '@/config/customGame.shared';
 
 // Game Logic Imports
@@ -147,6 +148,14 @@ export function setupSocketHandlers(io: SocketServer): void {
 
     // === RECONNECT ===
     socket.on('reconnect_player', handleReconnect(socket, io));
+
+    // === TIME SYNC ===
+    socket.on('time_sync_request', (data: { clientTime: number }) => {
+      handleTimeSyncRequest(socket, data.clientTime);
+    });
+    
+    // Send initial time sync on connect
+    socket.emit('time_sync', { serverTime: Date.now() });
 
     // === DISCONNECT ===
     socket.on('disconnect', handleDisconnect(socket, io));

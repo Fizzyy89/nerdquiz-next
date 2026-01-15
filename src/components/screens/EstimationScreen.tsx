@@ -1,37 +1,25 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Send, Calculator, Clock, Users } from 'lucide-react';
+import { Send, Calculator, Users } from 'lucide-react';
 import { useSocket } from '@/hooks/useSocket';
 import { useGameStore, usePlayers } from '@/store/gameStore';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Leaderboard } from '@/components/game';
+import { Leaderboard, GameTimer, useGameTimer } from '@/components/game';
 
 export function EstimationScreen() {
   const { submitEstimation } = useSocket();
   const { room, hasSubmitted, setHasSubmitted, estimationValue, setEstimationValue } = useGameStore();
   const players = usePlayers();
   const inputRef = useRef<HTMLInputElement>(null);
-  const [timeLeft, setTimeLeft] = useState(0);
 
   const question = room?.currentQuestion;
   const answeredCount = players.filter(p => p.hasAnswered).length;
 
-  // Timer
-  useEffect(() => {
-    if (!room?.timerEnd) return;
-
-    const update = () => {
-      const remaining = Math.max(0, Math.ceil((room.timerEnd! - Date.now()) / 1000));
-      setTimeLeft(remaining);
-    };
-
-    update();
-    const interval = setInterval(update, 100);
-    return () => clearInterval(interval);
-  }, [room?.timerEnd]);
+  // Synchronized timer using server time
+  const { remaining: timeLeft } = useGameTimer(room?.timerEnd ?? null, room?.serverTime);
 
   // Auto-focus input
   useEffect(() => {
@@ -58,9 +46,9 @@ export function EstimationScreen() {
 
   if (!question) return null;
 
-  const progress = room?.timerEnd 
-    ? Math.max(0, (room.timerEnd - Date.now()) / (room.settings.timePerQuestion * 1000) * 100)
-    : 0;
+  // Calculate progress from synchronized timer
+  const durationMs = room?.settings.timePerQuestion ? room.settings.timePerQuestion * 1000 : 0;
+  const progress = durationMs > 0 ? Math.max(0, (timeLeft * 1000 / durationMs) * 100) : 0;
 
   return (
     <motion.main
@@ -84,22 +72,19 @@ export function EstimationScreen() {
               </div>
             </div>
 
-            {/* Timer */}
+            {/* Timer - Server-synchronized */}
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-2 text-muted-foreground">
                 <Users className="w-4 h-4" />
                 <span className="text-sm font-medium">{answeredCount}/{players.length}</span>
               </div>
-              <motion.div
-                className={`flex items-center gap-2 px-4 py-2 rounded-full font-mono font-bold text-lg ${
-                  timeLeft <= 5 ? 'bg-red-500/20 text-red-500' : 'glass'
-                }`}
-                animate={timeLeft <= 5 ? { scale: [1, 1.05, 1] } : {}}
-                transition={{ repeat: Infinity, duration: 0.5 }}
-              >
-                <Clock className="w-5 h-5" />
-                {timeLeft}s
-              </motion.div>
+              <GameTimer
+                timerEnd={room?.timerEnd ?? null}
+                serverTime={room?.serverTime}
+                durationMs={room?.settings.timePerQuestion ? room.settings.timePerQuestion * 1000 : undefined}
+                warningThreshold={5}
+                criticalThreshold={3}
+              />
             </div>
           </div>
 
